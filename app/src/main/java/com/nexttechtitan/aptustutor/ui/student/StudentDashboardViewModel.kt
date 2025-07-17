@@ -1,0 +1,124 @@
+package com.nexttechtitan.aptustutor.ui.student
+
+import android.net.Uri
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.nexttechtitan.aptustutor.data.AptusTutorRepository
+import com.nexttechtitan.aptustutor.data.AssessmentAnswer
+import com.nexttechtitan.aptustutor.data.AssessmentSubmission
+import com.nexttechtitan.aptustutor.data.DiscoveredSession
+import com.nexttechtitan.aptustutor.data.QuestionType
+import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
+import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class StudentDashboardViewModel @Inject constructor(
+    private val repository: AptusTutorRepository,
+    private val userPreferencesRepository: UserPreferencesRepository
+) : ViewModel() {
+
+    val uiState = repository.studentUiState
+
+    private val _timeLeft = MutableStateFlow(0)
+    val timeLeft = _timeLeft.asStateFlow()
+    private var timerJob: Job? = null
+
+    val textAnswers = mutableStateMapOf<String, String>()
+    val imageAnswers = mutableStateMapOf<String, Uri>()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val sessionHistory: StateFlow<List<SessionWithClassDetails>> =
+        userPreferencesRepository.userIdFlow.flatMapLatest { studentId ->
+            repository.getSessionHistoryForStudent(studentId ?: "")
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun startDiscovery() {
+        viewModelScope.launch {
+            repository.startStudentDiscovery()
+        }
+    }
+
+    fun stopDiscovery() {
+        repository.stopStudentDiscovery()
+    }
+
+    fun joinSession(session: DiscoveredSession, pin: String) {
+        viewModelScope.launch {
+            repository.requestToJoinSession(session, pin)
+        }
+    }
+
+    fun startAssessmentTimer(durationInMinutes: Int) {
+        timerJob?.cancel()
+        textAnswers.clear()
+        imageAnswers.clear()
+        _timeLeft.value = durationInMinutes * 60
+        timerJob = viewModelScope.launch {
+            while (_timeLeft.value > 0) {
+                delay(1000)
+                _timeLeft.value--
+            }
+            if (_timeLeft.value <= 0) {
+                submitAssessment(true) // Auto-submit when time is up
+            }
+        }
+    }
+
+    fun updateTextAnswer(questionId: String, answer: String) {
+        textAnswers[questionId] = answer
+    }
+
+    fun updateImageAnswer(questionId: String, uri: Uri) {
+        imageAnswers[questionId] = uri
+    }
+
+    fun submitAssessment(isAutoSubmit: Boolean = false) {
+        timerJob?.cancel()
+        viewModelScope.launch {
+            val assessment = uiState.value.activeAssessment ?: return@launch
+            val studentId = userPreferencesRepository.userIdFlow.first() ?: return@launch
+            val studentName = userPreferencesRepository.userNameFlow.first() ?: "Student"
+
+            val finalAnswers = assessment.questions.map { q ->
+                AssessmentAnswer(
+                    questionId = q.id,
+                    textResponse = when {
+                        isAutoSubmit -> "[NO ANSWER - TIME UP]"
+                        q.type == QuestionType.TEXT_INPUT -> textAnswers[q.id] ?: ""
+                        else -> null
+                    }
+                )
+            }
+
+            val submission = AssessmentSubmission(
+                sessionId = assessment.sessionId,
+                studentId = studentId,
+                studentName = studentName,
+                assessmentId = assessment.id,
+                answers = finalAnswers
+            )
+
+            repository.submitAssessment(submission, imageAnswers)
+            // Reset state after submission
+            repository.clearActiveAssessmentForStudent()
+        }
+    }
+}
