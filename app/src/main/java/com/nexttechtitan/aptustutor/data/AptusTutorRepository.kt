@@ -22,16 +22,13 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Payloads for Nearby Connections
-data class SessionAdvertisementPayload(val sessionId: String, val tutorName: String, val className: String)
-data class ConnectionRequestPayload(val studentId: String, val studentName: String, val classPin: String)
-
 @Singleton
 class AptusTutorRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val classDao: ClassDao,
     private val sessionDao: SessionDao,
     private val studentProfileDao: StudentProfileDao,
+    private val assessmentDao: AssessmentDao,
     private val tutorProfileDao: TutorProfileDao,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val gson: Gson
@@ -123,13 +120,82 @@ class AptusTutorRepository @Inject constructor(
         }
     }
 
-    suspend fun sendAssessmentToAllStudents(assessment: Assessment) {
-        _tutorUiState.update { it.copy(isAssessmentActive = true, activeAssessment = assessment, assessmentSubmissions = emptyMap()) }
-        val wrapper = PayloadWrapper(type = "START_ASSESSMENT", jsonData = gson.toJson(assessment))
-        val payload = Payload.fromBytes(gson.toJson(wrapper).toByteArray(Charsets.UTF_8))
+    suspend fun sendAssessmentToAllStudents(assessmentBlueprint: AssessmentBlueprint) {
+        // 1. Save to database
+        val assessmentEntity = Assessment(
+            id = assessmentBlueprint.id,
+            sessionId = assessmentBlueprint.sessionId,
+            title = assessmentBlueprint.title,
+            questions = assessmentBlueprint.questions,
+            durationInMinutes = assessmentBlueprint.durationInMinutes
+        )
+        assessmentDao.insertAssessment(assessmentEntity)
 
-        _tutorUiState.value.connectedStudents.forEach { student ->
-            connectionsClient.sendPayload(student.endpointId, payload)
+        // 2. Create sanitized version for student, now with image filenames
+        val studentQuestions = assessmentBlueprint.questions.map {
+            StudentAssessmentQuestion(
+                id = it.id,
+                text = it.text,
+                type = it.type,
+                // Send only the filename, not the full path
+                questionImageFile = it.questionImagePath?.let { path -> File(path).name }
+            )
+        }
+        val assessmentForStudent = AssessmentForStudent(
+            id = assessmentBlueprint.id,
+            sessionId = assessmentBlueprint.sessionId,
+            title = assessmentBlueprint.title,
+            questions = studentQuestions,
+            durationInMinutes = assessmentBlueprint.durationInMinutes
+        )
+
+        // 3. Send the main assessment data first
+        _tutorUiState.update { it.copy(isAssessmentActive = true, activeAssessment = assessmentEntity) }
+        val wrapper = PayloadWrapper(type = "START_ASSESSMENT", jsonData = gson.toJson(assessmentForStudent))
+        val mainPayload = Payload.fromBytes(gson.toJson(wrapper).toByteArray(Charsets.UTF_8))
+
+        val studentEndpoints = _tutorUiState.value.connectedStudents.map { it.endpointId }
+        studentEndpoints.forEach { connectionsClient.sendPayload(it, mainPayload) }
+
+        // 4. ✅ Send the question image files
+        assessmentBlueprint.questions.forEach { question ->
+            question.questionImagePath?.let { path ->
+                val imageFile = File(path)
+                if (imageFile.exists()) {
+                    val fileHeader = FileHeader(questionId = question.id) // submissionId is null
+                    val headerWrapper = PayloadWrapper("QUESTION_FILE_HEADER", gson.toJson(fileHeader))
+                    val headerPayload = Payload.fromBytes(gson.toJson(headerWrapper).toByteArray(Charsets.UTF_8))
+                    val filePayload = Payload.fromFile(imageFile)
+
+                    studentEndpoints.forEach { endpointId ->
+                        // Send header, then file, for each student for each image
+                        connectionsClient.sendPayload(endpointId, headerPayload)
+                        connectionsClient.sendPayload(endpointId, filePayload)
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun saveManualGrade(submissionId: String, questionId: String, score: Int, feedback: String) {
+        val submission = assessmentDao.getSubmissionById(submissionId) ?: return
+        val updatedAnswers = submission.answers.map {
+            if (it.questionId == questionId) {
+                it.copy(score = score, feedback = feedback)
+            } else {
+                it
+            }
+        }
+        assessmentDao.insertSubmission(submission.copy(answers = updatedAnswers))
+    }
+
+    suspend fun sendFeedbackToStudent(submission: AssessmentSubmission) {
+        // Find the student's endpointId from the connected list
+        val studentEndpoint = _tutorUiState.value.connectedStudents.find { it.studentId == submission.studentId }?.endpointId
+        studentEndpoint?.let {
+            val wrapper = PayloadWrapper("ASSESSMENT_RESULT", gson.toJson(submission))
+            val payload = Payload.fromBytes(gson.toJson(wrapper).toByteArray(Charsets.UTF_8))
+            connectionsClient.sendPayload(it, payload)
         }
     }
 
@@ -250,10 +316,13 @@ class AptusTutorRepository @Inject constructor(
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            when (payload.type) {
-                Payload.Type.BYTES -> handleBytesPayload(endpointId, payload)
-                Payload.Type.FILE -> handleFilePayload(endpointId, payload)
-                else -> { /* Ignore Stream payloads for now */ }
+            repositoryScope.launch {
+                when (payload.type) {
+                    Payload.Type.BYTES -> handleBytesPayload(endpointId, payload)
+                    Payload.Type.FILE -> handleFilePayload(payload)
+                    else -> { /* Ignore Stream payloads for now */
+                    }
+                }
             }
         }
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
@@ -327,73 +396,95 @@ class AptusTutorRepository @Inject constructor(
         return sessionDao.getSessionHistoryWithDetailsForStudent(studentId)
     }
 
-    private fun handleBytesPayload(endpointId: String, payload: Payload) {
+    private suspend fun handleBytesPayload(endpointId: String, payload: Payload) {
         val payloadString = String(payload.asBytes()!!, Charsets.UTF_8)
         try {
             val wrapper = gson.fromJson(payloadString, PayloadWrapper::class.java)
             when (wrapper.type) {
                 "CONNECTION_REQUEST" -> handleConnectionRequest(endpointId, gson.fromJson(wrapper.jsonData, ConnectionRequestPayload::class.java))
-                "START_ASSESSMENT" -> handleStartAssessment(gson.fromJson(wrapper.jsonData, Assessment::class.java))
+                "START_ASSESSMENT" -> handleStartAssessment(gson.fromJson(wrapper.jsonData, AssessmentForStudent::class.java))
                 "SUBMISSION_METADATA" -> handleSubmissionMetadata(gson.fromJson(wrapper.jsonData, AssessmentSubmission::class.java))
                 "FILE_HEADER" -> handleFileHeader(payload.id, gson.fromJson(wrapper.jsonData, FileHeader::class.java))
+                "QUESTION_FILE_HEADER" -> handleFileHeader(payload.id, gson.fromJson(wrapper.jsonData, FileHeader::class.java))
+                "ASSESSMENT_RESULT" -> {
+                    val gradedSubmission = gson.fromJson(wrapper.jsonData, AssessmentSubmission::class.java)
+                    assessmentDao.insertSubmission(gradedSubmission)
+                }
             }
         } catch (e: JsonSyntaxException) { /* Malformed payload, ignore */ }
     }
 
-    private fun handleFilePayload(endpointId: String, payload: Payload) {
-        val fileHeader = pendingFileHeaders.remove(payload.id) ?: return // No header for this file, ignore
+    private suspend fun handleFilePayload(payload: Payload) {
+        val fileHeader = pendingFileHeaders.remove(payload.id) ?: return
 
-        // Find the pending submission
-        val submission = _tutorUiState.value.assessmentSubmissions[fileHeader.submissionId] ?: return
+        if (fileHeader.submissionId != null) {
+            // Find the pending submission
+            val submission = assessmentDao.getSubmissionById(fileHeader.submissionId) ?: return
 
-        // Create a safe place to store files
-        val sessionDir = File(context.filesDir, "assessment_files/${submission.sessionId}")
-        if (!sessionDir.exists()) sessionDir.mkdirs()
+            // Create a safe place to store files
+            val sessionDir = File(context.filesDir, "assessment_files/${submission.sessionId}")
+            if (!sessionDir.exists()) sessionDir.mkdirs()
+            val destinationFile =
+                File(sessionDir, "${fileHeader.submissionId}_${fileHeader.questionId}.jpg")
 
-        val destinationFile = File(sessionDir, "${fileHeader.submissionId}_${fileHeader.questionId}.jpg")
+            // Copy the received file
+            val inputStream = context.contentResolver.openInputStream(payload.asFile()!!.asUri()!!)
+            val outputStream = FileOutputStream(destinationFile)
+            inputStream?.copyTo(outputStream)
+            inputStream?.close()
+            outputStream.close()
 
-        // Copy the received file
-        val inputStream = context.contentResolver.openInputStream(payload.asFile()!!.asUri()!!)
-        val outputStream = FileOutputStream(destinationFile)
-        inputStream?.copyTo(outputStream)
-        inputStream?.close()
-        outputStream.close()
-
-        // Update the submission object with the local file path
-        val updatedAnswers = submission.answers.map {
-            if (it.questionId == fileHeader.questionId) {
-                it.copy(imageFilePath = destinationFile.absolutePath)
-            } else {
-                it
+            // Update the submission object with the local file path
+            val updatedAnswers = submission.answers.map {
+                if (it.questionId == fileHeader.questionId) {
+                    it.copy(imageFilePath = destinationFile.absolutePath)
+                } else {
+                    it
+                }
             }
-        }
-        val updatedSubmission = submission.copy(answers = updatedAnswers)
+            val updatedSubmission = submission.copy(answers = updatedAnswers)
 
-        _tutorUiState.update {
-            val updatedSubmissions = it.assessmentSubmissions + (updatedSubmission.studentId to updatedSubmission)
-            it.copy(assessmentSubmissions = updatedSubmissions)
+            // Save the updated submission back to the database
+            assessmentDao.insertSubmission(updatedSubmission)
+        } else {
+            // ✅ It's a question image file for the STUDENT
+            val activeAssessment = _studentUiState.value.activeAssessment ?: return
+
+            val question = activeAssessment.questions.find { it.id == fileHeader.questionId } ?: return
+
+            // Save the file locally on the student's device
+            val destinationFile = File(context.filesDir, question.questionImageFile!!)
+            context.contentResolver.openInputStream(payload.asFile()!!.asUri()!!)?.use { inputStream ->
+                FileOutputStream(destinationFile).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+
+            // Update the state with the new local path to trigger UI recomposition
+            val updatedQuestions = activeAssessment.questions.map {
+                if (it.id == fileHeader.questionId) {
+                    it.copy(questionImageFile = destinationFile.absolutePath)
+                } else {
+                    it
+                }
+            }
+            _studentUiState.update { it.copy(activeAssessment = it.activeAssessment?.copy(questions = updatedQuestions)) }
         }
     }
 
     // --- Payload Handling Sub-routines ---
-    private fun handleStartAssessment(assessment: Assessment) {
+    private fun handleStartAssessment(assessment: AssessmentForStudent) {
         _studentUiState.update { it.copy(activeAssessment = assessment) }
     }
 
-    private fun handleSubmissionMetadata(submission: AssessmentSubmission) {
-        // CRITICAL VALIDATION: Ignore if submission is not for the active session or from a non-connected student
+    private suspend fun handleSubmissionMetadata(submission: AssessmentSubmission) {
         val activeSessionId = _tutorUiState.value.activeSession?.sessionId
         val isFromConnectedStudent = _tutorUiState.value.connectedStudents.any { it.studentId == submission.studentId }
 
         if (submission.sessionId != activeSessionId || !isFromConnectedStudent) {
-            return // Ignore invalid submission
+            return
         }
-
-        // Store the initial submission metadata
-        _tutorUiState.update {
-            val updatedSubmissions = it.assessmentSubmissions + (submission.studentId to submission)
-            it.copy(assessmentSubmissions = updatedSubmissions)
-        }
+        assessmentDao.insertSubmission(submission)
     }
 
     private fun handleFileHeader(payloadId: Long, fileHeader: FileHeader) {
@@ -402,5 +493,21 @@ class AptusTutorRepository @Inject constructor(
 
     fun clearActiveAssessmentForStudent() {
         _studentUiState.update { it.copy(activeAssessment = null) }
+    }
+
+    fun getSubmissionsFlow(assessmentId: String): Flow<List<AssessmentSubmission>> {
+        return assessmentDao.getSubmissionsForAssessment(assessmentId)
+    }
+
+    fun getSubmissionFlow(submissionId: String): Flow<AssessmentSubmission?> {
+        return assessmentDao.getSubmissionFlow(submissionId)
+    }
+
+    fun getAssessmentFlow(submissionId: String): Flow<Assessment?> {
+        return assessmentDao.getAssessmentForSubmission(submissionId)
+    }
+
+    suspend fun switchUserRole(newRole: String) {
+        userPreferencesRepository.switchUserRole(newRole)
     }
 }

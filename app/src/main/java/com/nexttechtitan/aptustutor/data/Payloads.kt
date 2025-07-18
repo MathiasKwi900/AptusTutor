@@ -1,0 +1,43 @@
+package com.nexttechtitan.aptustutor.data
+
+import java.util.UUID
+
+// Payloads for Nearby Connections
+data class SessionAdvertisementPayload(val sessionId: String, val tutorName: String, val className: String)
+data class ConnectionRequestPayload(val studentId: String, val studentName: String, val classPin: String)
+
+data class StudentAssessmentQuestion(
+    val id: String,
+    val text: String,
+    val type: QuestionType,
+    val questionImageFile: String? = null
+)
+
+data class AssessmentBlueprint(
+    val id: String = UUID.randomUUID().toString(),
+    val sessionId: String,
+    val title: String,
+    val questions: List<AssessmentQuestion>,
+    val durationInMinutes: Int
+)
+
+// The assessment payload sent to the student
+data class AssessmentForStudent(
+    val id: String,
+    val sessionId: String,
+    val title: String,
+    val questions: List<StudentAssessmentQuestion>,
+    val durationInMinutes: Int
+)
+
+// A generic wrapper for all messages sent via BYTES payload
+data class PayloadWrapper(
+    val type: String, // e.g., "START_ASSESSMENT", "SUBMISSION_METADATA"
+    val jsonData: String
+)
+
+// A specific header sent right before an image file
+data class FileHeader(
+    val submissionId: String? = null,
+    val questionId: String
+)

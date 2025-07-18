@@ -16,15 +16,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
 import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
+import com.nexttechtitan.aptustutor.ui.tutor.SettingsMenu
 import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun StudentDashboardScreen(viewModel: StudentDashboardViewModel = hiltViewModel()) {
+fun StudentDashboardScreen(
+    viewModel: StudentDashboardViewModel = hiltViewModel(),
+    navController: NavHostController
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.sessionHistory.collectAsStateWithLifecycle()
     var sessionToJoin by remember { mutableStateOf<DiscoveredSession?>(null) }
@@ -54,62 +59,81 @@ fun StudentDashboardScreen(viewModel: StudentDashboardViewModel = hiltViewModel(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Student Dashboard", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(16.dp))
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Student Dashboard") },
+                actions = { SettingsMenu(onSwitchRole = viewModel::switchUserRole, navController = navController) }
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (permissionState.allPermissionsGranted) {
+                DiscoveryCard(
+                    isDiscovering = uiState.isDiscovering,
+                    onToggleDiscovery = { isChecked ->
+                        if (isChecked) viewModel.startDiscovery() else viewModel.stopDiscovery()
+                    })
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Status: ${uiState.connectionStatus}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
-        if (permissionState.allPermissionsGranted) {
-            DiscoveryCard(isDiscovering = uiState.isDiscovering, onToggleDiscovery = { isChecked ->
-                if (isChecked) viewModel.startDiscovery() else viewModel.stopDiscovery()
-            })
-            Spacer(Modifier.height(16.dp))
-            Text("Status: ${uiState.connectionStatus}", style = MaterialTheme.typography.titleMedium)
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                item {
-                    Text("Nearby Classes", style = MaterialTheme.typography.titleLarge)
-                }
-                if (uiState.discoveredSessions.isEmpty() && uiState.isDiscovering) {
-                    item { Text("Searching for classes...", modifier = Modifier.padding(top = 8.dp)) }
-                }
-                items(uiState.discoveredSessions) { session ->
-                    SessionCard(session = session, onJoin = { sessionToJoin = session })
-                }
-                item {
-                    Text(
-                        "My Attendance History",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
-                    )
-                }
-                if (history.isEmpty()) {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     item {
-                        Text("Your past sessions will appear here once you've been marked present in a class.")
+                        Text("Nearby Classes", style = MaterialTheme.typography.titleLarge)
                     }
-                } else {
-                    items(history) { sessionDetails ->
-                        HistoryCard(sessionDetails = sessionDetails)
+                    if (uiState.discoveredSessions.isEmpty() && uiState.isDiscovering) {
+                        item {
+                            Text(
+                                "Searching for classes...",
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                    }
+                    items(uiState.discoveredSessions) { session ->
+                        SessionCard(session = session, onJoin = { sessionToJoin = session })
+                    }
+                    item {
+                        Text(
+                            "My Attendance History",
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
+                        )
+                    }
+                    if (history.isEmpty()) {
+                        item {
+                            Text("Your past sessions will appear here once you've been marked present in a class.")
+                        }
+                    } else {
+                        items(history) { sessionDetails ->
+                            HistoryCard(sessionDetails = sessionDetails)
+                        }
                     }
                 }
-            }
 
-        } else {
-            PermissionsNotGrantedCard {
-                permissionState.launchMultiplePermissionRequest()
+            } else {
+                PermissionsNotGrantedCard {
+                    permissionState.launchMultiplePermissionRequest()
+                }
             }
         }
-    }
 
-    sessionToJoin?.let { session ->
-        JoinSessionDialog(
-            session = session,
-            onDismiss = { sessionToJoin = null },
-            onConfirm = { pin ->
-                viewModel.joinSession(session, pin)
-                sessionToJoin = null
-            }
-        )
+        sessionToJoin?.let { session ->
+            JoinSessionDialog(
+                session = session,
+                onDismiss = { sessionToJoin = null },
+                onConfirm = { pin ->
+                    viewModel.joinSession(session, pin)
+                    sessionToJoin = null
+                }
+            )
+        }
     }
 }
 

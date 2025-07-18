@@ -121,4 +121,12 @@ class StudentDashboardViewModel @Inject constructor(
             repository.clearActiveAssessmentForStudent()
         }
     }
+
+    fun switchUserRole() {
+        viewModelScope.launch {
+            val currentRole = userPreferencesRepository.userRoleFlow.first()
+            val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
+            repository.switchUserRole(newRole)
+        }
+    }
 }

@@ -28,6 +28,7 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.QuestionType
+import com.nexttechtitan.aptustutor.data.StudentAssessmentQuestion
 import java.io.File
 import java.util.Objects
 
@@ -132,7 +133,7 @@ fun AssessmentScreen(
 @Composable
 fun QuestionCard(
     questionNumber: Int,
-    question: AssessmentQuestion,
+    question: StudentAssessmentQuestion,
     viewModel: StudentDashboardViewModel
 ) {
     val context = LocalContext.current
@@ -153,6 +154,26 @@ fun QuestionCard(
             Text("Question $questionNumber", style = MaterialTheme.typography.titleMedium)
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text(question.text, style = MaterialTheme.typography.bodyLarge)
+            question.questionImageFile?.let { imagePath ->
+                Spacer(Modifier.height(8.dp))
+                // Check if it's a full path (already downloaded) or just a filename (pending)
+                val imageFile = File(imagePath)
+                if (imageFile.exists()) {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = imageFile),
+                        contentDescription = "Question Image",
+                        modifier = Modifier.fillMaxWidth().height(200.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    // Show a loading indicator while the image downloads
+                    Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                        Text("Loading image...")
+                    }
+                }
+            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Spacer(Modifier.height(16.dp))
 
             when (question.type) {

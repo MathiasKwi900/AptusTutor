@@ -88,7 +88,9 @@ dependencies {
     // Nearby Connections for Offline Sharing
     implementation(libs.play.services.nearby)
 
-    // --- Dependencies Added Back as Requested ---
+    // Gson for Serialization
+    implementation(libs.gson)
+
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

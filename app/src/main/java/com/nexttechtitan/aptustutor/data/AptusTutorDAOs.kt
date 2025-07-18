@@ -74,3 +74,28 @@ interface SessionDao {
 """)
     fun getSessionHistoryWithDetailsForStudent(studentId: String): Flow<List<SessionWithClassDetails>>
 }
+
+@Dao
+interface AssessmentDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAssessment(assessment: Assessment)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSubmission(submission: AssessmentSubmission)
+
+    @Query("SELECT * FROM assessment_submissions WHERE assessmentId = :assessmentId")
+    fun getSubmissionsForAssessment(assessmentId: String): Flow<List<AssessmentSubmission>>
+
+    @Query("SELECT * FROM assessment_submissions WHERE submissionId = :submissionId")
+    suspend fun getSubmissionById(submissionId: String): AssessmentSubmission?
+
+    @Query("""
+    SELECT A.* FROM assessments AS A
+    INNER JOIN assessment_submissions AS S ON A.id = S.assessmentId
+    WHERE S.submissionId = :submissionId
+""")
+    fun getAssessmentForSubmission(submissionId: String): Flow<Assessment?>
+
+    @Query("SELECT * FROM assessment_submissions WHERE submissionId = :submissionId")
+    fun getSubmissionFlow(submissionId: String): Flow<AssessmentSubmission?>
+}
