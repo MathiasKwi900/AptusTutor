@@ -7,6 +7,10 @@ import androidx.room.Index
 import androidx.room.Junction
 import androidx.room.PrimaryKey
 import androidx.room.Relation
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import java.util.UUID
 
 /**
@@ -110,53 +114,43 @@ data class SessionAttendance(
     // We can add quiz results here later
 )
 
-enum class QuestionType {
-    TEXT_INPUT,
-    HANDWRITTEN_IMAGE
-}
-
-// The definition of a single question
-data class AssessmentQuestion(
-    val id: String = UUID.randomUUID().toString(),
-    val text: String,
-    val type: QuestionType
-)
-
-// The entire assessment package sent from Tutor to Student
+@Entity(tableName = "assessments")
+@TypeConverters(Converters::class)
 data class Assessment(
-    val id: String = UUID.randomUUID().toString(),
-    val sessionId: String, // CRITICAL: Links assessment to this specific session
+    @PrimaryKey val id: String,
+    val sessionId: String,
     val title: String,
     val questions: List<AssessmentQuestion>,
     val durationInMinutes: Int
 )
 
-// A student's answer to a single question
-data class AssessmentAnswer(
-    val questionId: String,
-    val textResponse: String? = null,
-    // On the tutor's side, this will be populated with the path to the saved image file
-    var imageFilePath: String? = null
-)
-
-// The student's complete submission package
+@Entity(tableName = "assessment_submissions")
+@TypeConverters(Converters::class)
 data class AssessmentSubmission(
-    val submissionId: String = UUID.randomUUID().toString(), // Unique ID for this attempt
-    val sessionId: String, // CRITICAL: Must match the active session
+    @PrimaryKey val submissionId: String = UUID.randomUUID().toString(),
+    val sessionId: String,
     val studentId: String,
     val studentName: String,
     val assessmentId: String,
     var answers: List<AssessmentAnswer>
 )
 
-// A generic wrapper for all messages sent via BYTES payload
-data class PayloadWrapper(
-    val type: String, // e.g., "START_ASSESSMENT", "SUBMISSION_METADATA"
-    val jsonData: String
-)
+class Converters {
+    @TypeConverter
+    fun fromQuestionList(value: List<AssessmentQuestion>?): String = Gson().toJson(value)
 
-// A specific header sent right before an image file
-data class FileHeader(
-    val submissionId: String,
-    val questionId: String
-)
+    @TypeConverter
+    fun toQuestionList(value: String): List<AssessmentQuestion>? {
+        val listType = object : TypeToken<List<AssessmentQuestion>?>() {}.type
+        return Gson().fromJson(value, listType)
+    }
+
+    @TypeConverter
+    fun fromAnswerList(value: List<AssessmentAnswer>?): String = Gson().toJson(value)
+
+    @TypeConverter
+    fun toAnswerList(value: String): List<AssessmentAnswer>? {
+        val listType = object : TypeToken<List<AssessmentAnswer>?>() {}.type
+        return Gson().fromJson(value, listType)
+    }
+}

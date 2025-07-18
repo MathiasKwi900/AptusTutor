@@ -43,4 +43,10 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
             preferences[ONBOARDING_COMPLETE_KEY] = "true"
         }
     }
+
+    suspend fun switchUserRole(newRole: String) {
+        context.dataStore.edit { preferences ->
+            preferences[USER_ROLE_KEY] = newRole
+        }
+    }
 }

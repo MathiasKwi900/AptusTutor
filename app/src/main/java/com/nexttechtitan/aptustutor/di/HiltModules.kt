@@ -11,6 +11,7 @@ import com.google.gson.Gson
 import com.nexttechtitan.aptustutor.data.AptusTutorDatabase
 import com.nexttechtitan.aptustutor.data.ClassDao
 import com.nexttechtitan.aptustutor.data.SessionDao
+import com.nexttechtitan.aptustutor.data.AssessmentDao
 import com.nexttechtitan.aptustutor.data.StudentProfileDao
 import com.nexttechtitan.aptustutor.data.TutorProfileDao
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
@@ -60,6 +61,9 @@ object AppModule {
 
     @Provides
     fun provideSessionDao(db: AptusTutorDatabase): SessionDao = db.sessionDao()
+
+    @Provides
+    fun provideAssessmentDao(db: AptusTutorDatabase): AssessmentDao = db.assessmentDao()
 
     @Provides
     @Singleton

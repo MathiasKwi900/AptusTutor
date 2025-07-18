@@ -1,6 +1,8 @@
 // File: data/UiState.kt
 package com.nexttechtitan.aptustutor.data
 
+import java.util.UUID
+
 // --- Data for UI display ---
 
 // Represents a session a student can see and request to join
@@ -32,7 +34,6 @@ enum class VerificationStatus {
     REJECTED // For students with the wrong PIN
 }
 
-
 // --- Main UI State Holders ---
 
 data class TutorDashboardUiState(
@@ -52,6 +53,29 @@ data class StudentDashboardUiState(
     val discoveredSessions: List<DiscoveredSession> = emptyList(),
     val connectedSession: DiscoveredSession? = null,
     val connectionStatus: String = "Idle",
-    val activeAssessment: Assessment? = null,
+    val activeAssessment: AssessmentForStudent? = null,
     val error: String? = null
+)
+
+// The definition of a single question
+data class AssessmentQuestion(
+    val id: String = UUID.randomUUID().toString(),
+    val text: String,
+    val type: QuestionType,
+    val markingGuide: String,
+    var questionImagePath: String? = null
+)
+
+enum class QuestionType {
+    TEXT_INPUT,
+    HANDWRITTEN_IMAGE
+}
+
+// A student's answer to a single question
+data class AssessmentAnswer(
+    val questionId: String,
+    val textResponse: String? = null,
+    var imageFilePath: String? = null,
+    var score: Int? = null,
+    var feedback: String? = null
 )

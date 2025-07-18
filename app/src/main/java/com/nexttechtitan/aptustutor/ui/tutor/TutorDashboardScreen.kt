@@ -2,7 +2,13 @@
 package com.nexttechtitan.aptustutor.ui.tutor
 
 import android.Manifest
+import android.content.Context
+import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,11 +24,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,6 +52,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,28 +62,43 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
+import coil.compose.rememberAsyncImagePainter
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import com.nexttechtitan.aptustutor.data.Assessment
+import com.nexttechtitan.aptustutor.data.AssessmentBlueprint
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
+import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import com.nexttechtitan.aptustutor.data.ClassWithStudents
 import com.nexttechtitan.aptustutor.data.ConnectedStudent
 import com.nexttechtitan.aptustutor.data.ConnectionRequest
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.TutorDashboardUiState
 import com.nexttechtitan.aptustutor.data.VerificationStatus
+import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
+import com.nexttechtitan.aptustutor.ui.student.ComposeFileProvider
 import kotlinx.coroutines.flow.collectLatest
+import java.io.File
+import java.io.FileOutputStream
 
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun TutorDashboardScreen(viewModel: TutorDashboardViewModel = hiltViewModel()) {
+fun TutorDashboardScreen(
+    viewModel: TutorDashboardViewModel = hiltViewModel(),
+    onNavigateToSubmission: (String) -> Unit,
+    navController: NavHostController
+    ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val classes by viewModel.tutorClasses.collectAsStateWithLifecycle(initialValue = emptyList())
+    val submissions by viewModel.assessmentSubmissions.collectAsStateWithLifecycle()
 
     // State for dialogs
     var showCreateClassDialog by remember { mutableStateOf(false) }
@@ -119,14 +144,18 @@ fun TutorDashboardScreen(viewModel: TutorDashboardViewModel = hiltViewModel()) {
                     onReject = { endpointId -> viewModel.rejectStudent(endpointId) },
                     onAcceptAll = { viewModel.acceptAll() },
                     onMarkAbsent = { studentId -> viewModel.markStudentAbsent(studentId) },
-                    onCreateAssessment = { showCreateAssessmentDialog = true }
+                    onCreateAssessment = { showCreateAssessmentDialog = true },
+                    submissions = submissions,
+                    onNavigateToSubmission = onNavigateToSubmission
                 )
             } else {
                 // --- CLASS MANAGEMENT VIEW ---
                 ClassManagementScreen(
                     classes = classes,
                     onShowCreateClassDialog = { showCreateClassDialog = true },
-                    onStartSession = { selectedClass -> selectedClassToStart = selectedClass }
+                    onStartSession = { selectedClass -> selectedClassToStart = selectedClass },
+                    viewModel = viewModel,
+                    navController = navController
                 )
             }
         }
@@ -161,8 +190,8 @@ fun TutorDashboardScreen(viewModel: TutorDashboardViewModel = hiltViewModel()) {
                 CreateAssessmentDialog(
                     sessionId = activeSessionId,
                     onDismiss = { showCreateAssessmentDialog = false },
-                    onSend = { assessment ->
-                        viewModel.sendAssessment(assessment)
+                    onSend = { assessmentBlueprint ->
+                        viewModel.sendAssessment(assessmentBlueprint)
                         showCreateAssessmentDialog = false
                     }
                 )
@@ -189,29 +218,49 @@ fun TutorDashboardScreen(viewModel: TutorDashboardViewModel = hiltViewModel()) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClassManagementScreen(
     classes: List<ClassWithStudents>,
     onShowCreateClassDialog: () -> Unit,
-    onStartSession: (ClassWithStudents) -> Unit
+    onStartSession: (ClassWithStudents) -> Unit,
+    viewModel: TutorDashboardViewModel,
+    navController: NavHostController
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text("Tutor Dashboard", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onShowCreateClassDialog) {
-            Text("Create New Class")
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Tutor Dashboard") },
+                actions = { SettingsMenu(onSwitchRole = viewModel::switchUserRole, navController = navController) }
+            )
         }
-        Spacer(Modifier.height(16.dp))
-        HorizontalDivider()
-        LazyColumn {
-            item {
-                Text("My Classes", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 8.dp))
+    ) { paddingValues ->
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp)
+        ) {
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onShowCreateClassDialog) {
+                Text("Create New Class")
             }
-            if (classes.isEmpty()) {
-                item { Text("No classes created yet. Click the button to create your first class.") }
-            } else {
-                items(classes) { classWithStudents ->
-                    ClassCard(classWithStudents, onStart = { onStartSession(classWithStudents) })
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            LazyColumn {
+                item {
+                    Text(
+                        "My Classes",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                if (classes.isEmpty()) {
+                    item { Text("No classes created yet. Click the button to create your first class.") }
+                } else {
+                    items(classes) { classWithStudents ->
+                        ClassCard(
+                            classWithStudents,
+                            onStart = { onStartSession(classWithStudents) })
+                    }
                 }
             }
         }
@@ -226,7 +275,9 @@ fun ActiveSessionScreen(
     onReject: (String) -> Unit,
     onAcceptAll: () -> Unit,
     onMarkAbsent: (String) -> Unit,
-    onCreateAssessment: () -> Unit
+    onCreateAssessment: () -> Unit,
+    submissions: List<AssessmentSubmission>,
+    onNavigateToSubmission: (String) -> Unit
 ) {
     val activeClass = uiState.activeClass!!.classProfile
     val rosterSize = uiState.activeClass!!.students.size
@@ -271,7 +322,7 @@ fun ActiveSessionScreen(
 
         when (selectedTabIndex) {
             0 -> LiveRosterTab(uiState, onAccept, onReject, onAcceptAll, onMarkAbsent)
-            1 -> AssessmentTab(uiState)
+            1 -> AssessmentTab(uiState, submissions, onSubmissionClicked = onNavigateToSubmission)
         }
     }
 }
@@ -305,17 +356,26 @@ fun LiveRosterTab(
 }
 
 @Composable
-fun AssessmentTab(uiState: TutorDashboardUiState) {
+fun AssessmentTab(
+    uiState: TutorDashboardUiState,
+    submissions: List<AssessmentSubmission>,
+    onSubmissionClicked: (String) -> Unit
+) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         if (!uiState.isAssessmentActive || uiState.activeAssessment == null) {
             Text("No active assessment. Create one from the main controls.", modifier = Modifier.padding(16.dp))
         } else {
             Text("Submissions for: ${uiState.activeAssessment.title}", style = MaterialTheme.typography.titleLarge)
-            Text("${uiState.assessmentSubmissions.size} / ${uiState.connectedStudents.size} submitted", style = MaterialTheme.typography.titleSmall)
+            Text("${submissions.size} / ${uiState.connectedStudents.size} submitted", style = MaterialTheme.typography.titleSmall)
+
 
             LazyColumn(modifier = Modifier.padding(top = 8.dp)) {
-                items(uiState.assessmentSubmissions.values.toList()) { submission ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                items(submissions) { submission ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                            onSubmissionClicked(submission.submissionId)
+                        }
+                    ) {
                         Text(submission.studentName, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
                     }
                 }
@@ -328,7 +388,7 @@ fun AssessmentTab(uiState: TutorDashboardUiState) {
 fun CreateAssessmentDialog(
     sessionId: String,
     onDismiss: () -> Unit,
-    onSend: (Assessment) -> Unit
+    onSend: (AssessmentBlueprint) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var duration by remember { mutableStateOf("10") }
@@ -357,11 +417,19 @@ fun CreateAssessmentDialog(
                                 val index = questions.indexOf(question)
                                 if (index != -1) questions[index] = question.copy(type = newType)
                             },
+                            onMarkingGuideChange = { newGuide ->
+                                val index = questions.indexOf(question)
+                                if (index != -1) questions[index] = question.copy(markingGuide = newGuide)
+                            },
+                            onImageAttached = { newPath ->
+                                val index = questions.indexOf(question)
+                                if (index != -1) questions[index] = question.copy(questionImagePath = newPath)
+                            },
                             onDelete = { questions.remove(question) }
                         )
                     }
                     item {
-                        Button(onClick = { questions.add(AssessmentQuestion(text = "", type = QuestionType.TEXT_INPUT)) }, modifier = Modifier.padding(top = 8.dp)) {
+                        Button(onClick = { questions.add(AssessmentQuestion(text = "", type = QuestionType.TEXT_INPUT, markingGuide = "")) }, modifier = Modifier.padding(top = 8.dp)) {
                             Icon(Icons.Default.Add, contentDescription = "Add Question")
                             Spacer(Modifier.width(4.dp))
                             Text("Add Question")
@@ -373,13 +441,13 @@ fun CreateAssessmentDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val assessment = Assessment(
+                    val blueprint = AssessmentBlueprint(
                         sessionId = sessionId,
                         title = title,
                         durationInMinutes = duration.toIntOrNull() ?: 10,
                         questions = questions.toList()
                     )
-                    onSend(assessment)
+                    onSend(blueprint)
                 },
                 enabled = title.isNotBlank() && duration.isNotBlank() && questions.isNotEmpty()
             ) {
@@ -397,12 +465,38 @@ fun QuestionEditor(
     question: AssessmentQuestion,
     onQuestionChange: (String) -> Unit,
     onTypeChange: (QuestionType) -> Unit,
+    onMarkingGuideChange: (String) -> Unit,
+    onImageAttached: (String?) -> Unit,
     onDelete: () -> Unit
 ) {
     var dropdownExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var tempImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri: Uri? ->
+            uri?.let {
+                val localPath = copyUriToInternalStorage(context, it, "q_${question.id}")
+                onImageAttached(localPath)
+            }
+        }
+    )
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success) {
+                tempImageUri?.let {
+                    val localPath = copyUriToInternalStorage(context, it, "q_${question.id}")
+                    onImageAttached(localPath)
+                }
+            }
+        }
+    )
 
     Card(modifier = Modifier.padding(vertical = 8.dp).border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)) {
-        Column(modifier = Modifier.padding(8.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Text("Question", style = MaterialTheme.typography.labelLarge)
                 IconButton(onClick = onDelete) {
@@ -411,7 +505,34 @@ fun QuestionEditor(
             }
             OutlinedTextField(value = question.text, onValueChange = onQuestionChange, label = { Text("Question Text") }, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            Box {
+            if (question.questionImagePath != null) {
+                Box {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = File(question.questionImagePath!!)),
+                        contentDescription = "Question Image",
+                        modifier = Modifier.fillMaxWidth().height(150.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                    IconButton(onClick = { onImageAttached(null) }, modifier = Modifier.align(Alignment.TopEnd)) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove Image", tint = Color.White, modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape))
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { imagePickerLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) {
+                        Text("Pick Image")
+                    }
+                    OutlinedButton(onClick = {
+                        val uri = ComposeFileProvider.getImageUri(context)
+                        tempImageUri = uri
+                        cameraLauncher.launch(uri)
+                    }, modifier = Modifier.weight(1f)) {
+                        Text("Take Photo")
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Column {
                 OutlinedTextField(
                     value = question.type.name.replace("_", " "),
                     onValueChange = {},
@@ -425,6 +546,12 @@ fun QuestionEditor(
                         DropdownMenuItem(text = { Text(type.name.replace("_", " ")) }, onClick = { onTypeChange(type); dropdownExpanded = false })
                     }
                 }
+                OutlinedTextField(
+                    value = question.markingGuide,
+                    onValueChange = onMarkingGuideChange,
+                    label = { Text("Marking Guide / Correct Answer") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                )
             }
         }
     }
@@ -546,5 +673,57 @@ fun StudentRequestCard(request: ConnectionRequest, onAccept: () -> Unit, onRejec
                 OutlinedButton(onClick = onReject) { Text("Reject") }
             }
         }
+    }
+}
+
+@Composable
+fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
+    var showMenu by remember { mutableStateOf(false) }
+    var showDialog by remember { mutableStateOf(false) }
+
+    IconButton(onClick = { showMenu = true }) {
+        Icon(Icons.Default.MoreVert, contentDescription = "Settings")
+    }
+    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+        DropdownMenuItem(
+            text = { Text("Switch Role") },
+            onClick = {
+                showMenu = false
+                showDialog = true
+            }
+        )
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Switch Role?") },
+            text = { Text("Your data and user ID will be preserved. You will be taken to the other dashboard.") },
+            confirmButton = {
+                Button(onClick = {
+                    onSwitchRole()
+                    // Navigate to splash to force a refresh of the start destination
+                    navController.navigate(AptusTutorScreen.Splash.name) {
+                        popUpTo(0) { inclusive = true } // Clear the entire back stack
+                    }
+                }) { Text("Confirm") }
+            },
+            dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+fun copyUriToInternalStorage(context: Context, uri: Uri, newName: String): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri)
+        val file = File(context.filesDir, "$newName.jpg")
+        val outputStream = FileOutputStream(file)
+        inputStream?.copyTo(outputStream)
+        inputStream?.close()
+        outputStream.close()
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
     }
 }
