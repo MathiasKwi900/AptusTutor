@@ -13,12 +13,16 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="31" />
+
     <!--
     Required for Android 10 (API 29) and above for discovering devices.
     You must request both FINE and COARSE to satisfy modern Android requirements.
     -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Required to check for network connectivity (for Firebase model download) -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

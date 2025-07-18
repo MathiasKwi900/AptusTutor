@@ -128,4 +128,8 @@ class TutorDashboardViewModel @Inject constructor(
             repository.switchUserRole(newRole)
         }
     }
+
+    fun errorShown() {
+        repository.errorShown()
+    }
 }

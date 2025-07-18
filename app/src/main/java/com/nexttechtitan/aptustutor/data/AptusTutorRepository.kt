@@ -2,6 +2,7 @@ package com.nexttechtitan.aptustutor.data
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
 import com.google.gson.Gson
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -49,18 +51,21 @@ class AptusTutorRepository @Inject constructor(
 
     fun getClassesForTutor(tutorId: String) = classDao.getClassesForTutor(tutorId)
 
-    suspend fun createNewClass(className: String): Boolean {
-        val tutorId = userPreferencesRepository.userIdFlow.first() ?: return false
+
+
+    suspend fun createNewClass(className: String): Boolean = withContext(Dispatchers.IO) {
+        val tutorId = userPreferencesRepository.userIdFlow.first() ?: return@withContext false
         val pin = (1000..9999).random().toString()
         val classProfile = ClassProfile(tutorOwnerId = tutorId, className = className, classPin = pin)
         val result = classDao.insertClass(classProfile)
-        return result != -1L
+        result != -1L
     }
 
     suspend fun startTutorSession(classId: Long) {
         val tutorId = userPreferencesRepository.userIdFlow.first() ?: return
         val tutorName = userPreferencesRepository.userNameFlow.first() ?: "Tutor"
         val classWithStudents = classDao.getClassWithStudents(classId).first()
+        val className = classWithStudents.classProfile.className
 
         val sessionId = UUID.randomUUID().toString()
         val session = Session(sessionId, classId, tutorId, System.currentTimeMillis())
@@ -68,12 +73,18 @@ class AptusTutorRepository @Inject constructor(
 
         _tutorUiState.update { it.copy(isAdvertising = true, activeSession = session, activeClass = classWithStudents) }
 
-        val advertisement = gson.toJson(SessionAdvertisementPayload(sessionId, tutorName, classWithStudents.classProfile.className))
+        val advertisementPayload = SessionAdvertisementPayload(sessionId, tutorName, className)
+        val advertisementName = gson.toJson(advertisementPayload)
+
+        Log.d("AptusTutorDebug", "[TUTOR] startTutorSession: Attempting to advertise with name: $advertisementName")
         val advertisingOptions = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
 
         try {
-            connectionsClient.startAdvertising(advertisement.toByteArray(Charsets.UTF_8), serviceId, connectionLifecycleCallback, advertisingOptions).await()
+            // The advertisementName string IS the payload for discovery.
+            connectionsClient.startAdvertising(advertisementName, serviceId, connectionLifecycleCallback, advertisingOptions).await()
+            Log.d("AptusTutorDebug", "[TUTOR] startTutorSession: Advertising successfully started.")
         } catch (e: Exception) {
+            Log.e("AptusTutorDebug", "[TUTOR] startTutorSession: Advertising FAILED", e)
             _tutorUiState.update { it.copy(isAdvertising = false, error = e.localizedMessage) }
         }
     }
@@ -121,6 +132,7 @@ class AptusTutorRepository @Inject constructor(
     }
 
     suspend fun sendAssessmentToAllStudents(assessmentBlueprint: AssessmentBlueprint) {
+        Log.d("AptusTutorDebug", "[TUTOR] sendAssessmentToAllStudents: Sending assessment titled '${assessmentBlueprint.title}' to students.")
         // 1. Save to database
         val assessmentEntity = Assessment(
             id = assessmentBlueprint.id,
@@ -177,8 +189,8 @@ class AptusTutorRepository @Inject constructor(
         }
     }
 
-    suspend fun saveManualGrade(submissionId: String, questionId: String, score: Int, feedback: String) {
-        val submission = assessmentDao.getSubmissionById(submissionId) ?: return
+    suspend fun saveManualGrade(submissionId: String, questionId: String, score: Int, feedback: String) = withContext(Dispatchers.IO) {
+        val submission = assessmentDao.getSubmissionById(submissionId) ?: return@withContext
         val updatedAnswers = submission.answers.map {
             if (it.questionId == questionId) {
                 it.copy(score = score, feedback = feedback)
@@ -202,13 +214,22 @@ class AptusTutorRepository @Inject constructor(
     // --- Student Functions ---
 
     suspend fun startStudentDiscovery() {
+        Log.d("AptusTutorDebug", "[STUDENT] startStudentDiscovery: Attempting to start discovery.")
         _studentUiState.update { it.copy(isDiscovering = true, discoveredSessions = emptyList()) }
         val discoveryOptions = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
-        try {
-            connectionsClient.startDiscovery(serviceId, endpointDiscoveryCallback, discoveryOptions).await()
-        } catch (e: Exception) {
-            _studentUiState.update { it.copy(isDiscovering = false, error = e.localizedMessage) }
-        }
+        connectionsClient.startDiscovery(serviceId, endpointDiscoveryCallback, discoveryOptions)
+            .addOnSuccessListener {
+                Log.d("AptusTutorDebug", "[STUDENT] startStudentDiscovery: Discovery successfully started.")
+                // Discovery started successfully, no need to do anything here
+                // as the state is already updated.
+            }
+            .addOnFailureListener { e ->
+                Log.e("AptusTutorDebug", "[STUDENT] startStudentDiscovery: Discovery FAILED.", e)
+                val apiException = e as? com.google.android.gms.common.api.ApiException
+                val statusCode = apiException?.statusCode ?: "N/A"
+                val errorDetails = "Error: ${e.message}, Status Code: $statusCode"
+                _studentUiState.update { it.copy(isDiscovering = false, error = errorDetails) }
+            }
     }
 
     fun stopStudentDiscovery() {
@@ -219,19 +240,24 @@ class AptusTutorRepository @Inject constructor(
     suspend fun requestToJoinSession(session: DiscoveredSession, pin: String) {
         val studentId = userPreferencesRepository.userIdFlow.first() ?: return
         val studentName = userPreferencesRepository.userNameFlow.first() ?: "Student"
+        _studentUiState.update { it.copy(connectionStatus = "Requesting...") }
+        Log.d("AptusTutorDebug", "[STUDENT] requestToJoinSession: Requesting to join session=${session.sessionId} with endpointId=${session.endpointId}")
 
-        _studentUiState.update { it.copy(connectionStatus = "Connecting...") }
-
-        val payload = gson.toJson(ConnectionRequestPayload(studentId, studentName, pin))
-        try {
-            connectionsClient.requestConnection(studentId, session.endpointId, connectionLifecycleCallback)
-                .addOnSuccessListener {
-                    connectionsClient.sendPayload(session.endpointId, Payload.fromBytes(payload.toByteArray(Charsets.UTF_8)))
-                }
-                .await()
-        } catch (e: Exception) {
-            _studentUiState.update { it.copy(connectionStatus = "Failed", error = e.localizedMessage) }
-        }
+        connectionsClient.requestConnection(studentName, session.endpointId, connectionLifecycleCallback)
+            .addOnSuccessListener {
+                Log.d("AptusTutorDebug", "[STUDENT] requestToJoinSession: Connection request sent. Now sending payload with PIN.")
+                // The request was sent. Now, immediately send the payload with the secret PIN and persistent ID.
+                // The tutor will use this payload to decide whether to accept or reject.
+                val payloadData = ConnectionRequestPayload(studentId = studentId, studentName = studentName, classPin = pin)
+                val wrapper = PayloadWrapper("CONNECTION_REQUEST", gson.toJson(payloadData))
+                val payload = Payload.fromBytes(gson.toJson(wrapper).toByteArray(Charsets.UTF_8))
+                connectionsClient.sendPayload(session.endpointId, payload)
+            }
+            .addOnFailureListener { e ->
+                Log.e("AptusTutorDebug", "[STUDENT] requestToJoinSession: Connection request FAILED.", e)
+                _studentUiState.update { it.copy(connectionStatus = "Failed to connect", error = e.localizedMessage) }
+                connectionsClient.disconnectFromEndpoint(session.endpointId)
+            }
     }
 
     suspend fun submitAssessment(submission: AssessmentSubmission, imageAnswers: Map<String, Uri>) {
@@ -261,22 +287,35 @@ class AptusTutorRepository @Inject constructor(
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, connectionInfo: ConnectionInfo) {
-            // This callback is now primarily for the Student side to know an invitation is coming.
-            // The tutor's logic will be handled via the payload.
-            connectionsClient.acceptConnection(endpointId, payloadCallback)
+            // On the TUTOR side, we now do nothing here. We wait for the CONNECTION_REQUEST
+            // payload to arrive, which will trigger the logic in `handleConnectionRequest`.
+
+            // On the STUDENT side, we can optionally update the UI to show the request is being processed.
+            val role = if (_tutorUiState.value.activeClass != null) "TUTOR" else "STUDENT"
+            Log.d("AptusTutorDebug", "[$role] onConnectionInitiated: From endpointId=$endpointId, name=${connectionInfo.endpointName}")
+            _studentUiState.update { it.copy(connectionStatus = "Handshaking...") }
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            val role = if (_tutorUiState.value.activeClass != null) "TUTOR" else "STUDENT"
+            val status = if (result.status.isSuccess) "SUCCESS" else "FAILURE (Code: ${result.status.statusCode})"
+            Log.d("AptusTutorDebug", "[$role] onConnectionResult: For endpointId=$endpointId, Result: $status")
             if (result.status.isSuccess) {
-                // Student successfully connected
-                _studentUiState.update { it.copy(connectionStatus = "Connected") }
+                _studentUiState.update {
+                    it.copy(
+                        connectionStatus = "Connected",
+                        connectedSession = it.discoveredSessions.find { s -> s.endpointId == endpointId }
+                    )
+                }
             } else {
-                // Disconnected or failed
+                _studentUiState.update { it.copy(connectionStatus = "Failed") }
                 handleDisconnect(endpointId)
             }
         }
 
         override fun onDisconnected(endpointId: String) {
+            val role = if (_tutorUiState.value.activeClass != null) "TUTOR" else "STUDENT"
+            Log.d("AptusTutorDebug", "[$role] onDisconnected: From endpointId=$endpointId")
             handleDisconnect(endpointId)
         }
     }
@@ -298,24 +337,32 @@ class AptusTutorRepository @Inject constructor(
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+            Log.d("AptusTutorDebug", "[STUDENT] onEndpointFound: Found endpointId=$endpointId with raw name=${info.endpointName}")
             try {
-                val payloadString = String(info.endpointInfo, Charsets.UTF_8)
+                // The endpointName is the JSON string sent by the tutor.
+                val payloadString = info.endpointName
                 val ad = gson.fromJson(payloadString, SessionAdvertisementPayload::class.java)
                 val discoveredSession = DiscoveredSession(endpointId, ad.sessionId, ad.tutorName, ad.className)
+                Log.d("AptusTutorDebug", "[STUDENT] onEndpointFound: Successfully parsed session: ${ad.className}")
+
                 _studentUiState.update {
                     val currentSessions = it.discoveredSessions.filterNot { s -> s.endpointId == endpointId }
                     it.copy(discoveredSessions = currentSessions + discoveredSession)
                 }
-            } catch (e: JsonSyntaxException) { /* Ignore malformed advertisement */ }
+            } catch (e: JsonSyntaxException) {
+                Log.e("AptusTutorDebug", "[STUDENT] onEndpointFound: Failed to parse JSON from endpointName", e)
+            }
         }
 
         override fun onEndpointLost(endpointId: String) {
+            Log.d("AptusTutorDebug", "[STUDENT] onEndpointLost: Lost endpointId=$endpointId")
             _studentUiState.update { it.copy(discoveredSessions = it.discoveredSessions.filterNot { s -> s.endpointId == endpointId }) }
         }
     }
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            Log.d("AptusTutorDebug", "onPayloadReceived: From endpointId=$endpointId, Payload type: ${payload.type}")
             repositoryScope.launch {
                 when (payload.type) {
                     Payload.Type.BYTES -> handleBytesPayload(endpointId, payload)
@@ -331,6 +378,7 @@ class AptusTutorRepository @Inject constructor(
     }
 
     private fun handleConnectionRequest(endpointId: String, request: ConnectionRequestPayload) {
+        Log.d("AptusTutorDebug", "[TUTOR] handleConnectionRequest: Received PIN from ${request.studentName} for endpointId=$endpointId")
         val activeClass = _tutorUiState.value.activeClass ?: return // Safety check
 
         repositoryScope.launch {
@@ -343,10 +391,20 @@ class AptusTutorRepository @Inject constructor(
                 else -> VerificationStatus.REJECTED
             }
 
+            Log.d("AptusTutorDebug", "[TUTOR] handleConnectionRequest: Expected PIN: $expectedPin, Received PIN: ${request.classPin}")
             if (status != VerificationStatus.REJECTED) {
-                val newRequest = ConnectionRequest(endpointId, request.studentId, request.studentName, status)
-                _tutorUiState.update { it.copy(connectionRequests = it.connectionRequests + newRequest) }
+                Log.d("AptusTutorDebug", "[TUTOR] handleConnectionRequest: PIN Correct. Accepting connection for endpointId=$endpointId")
+                connectionsClient.acceptConnection(endpointId, payloadCallback)
+                    .addOnSuccessListener {
+                        Log.d("AptusTutorDebug", "[TUTOR] handleConnectionRequest: Successfully accepted connection for $endpointId. Adding to pending list.")
+                        val newRequest = ConnectionRequest(endpointId, request.studentId, request.studentName, status)
+                        _tutorUiState.update { it.copy(connectionRequests = it.connectionRequests + newRequest) }
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("AptusTutorDebug", "[TUTOR] handleConnectionRequest: FAILED to accept connection for $endpointId.", e)
+                    }
             } else {
+                Log.w("AptusTutorDebug", "[TUTOR] handleConnectionRequest: PIN Incorrect. Rejecting connection for endpointId=$endpointId")
                 rejectStudent(endpointId)
             }
         }
@@ -414,12 +472,12 @@ class AptusTutorRepository @Inject constructor(
         } catch (e: JsonSyntaxException) { /* Malformed payload, ignore */ }
     }
 
-    private suspend fun handleFilePayload(payload: Payload) {
-        val fileHeader = pendingFileHeaders.remove(payload.id) ?: return
+    private suspend fun handleFilePayload(payload: Payload) = withContext(Dispatchers.IO) {
+        val fileHeader = pendingFileHeaders.remove(payload.id) ?: return@withContext
 
         if (fileHeader.submissionId != null) {
             // Find the pending submission
-            val submission = assessmentDao.getSubmissionById(fileHeader.submissionId) ?: return
+            val submission = assessmentDao.getSubmissionById(fileHeader.submissionId) ?: return@withContext
 
             // Create a safe place to store files
             val sessionDir = File(context.filesDir, "assessment_files/${submission.sessionId}")
@@ -428,11 +486,12 @@ class AptusTutorRepository @Inject constructor(
                 File(sessionDir, "${fileHeader.submissionId}_${fileHeader.questionId}.jpg")
 
             // Copy the received file
-            val inputStream = context.contentResolver.openInputStream(payload.asFile()!!.asUri()!!)
-            val outputStream = FileOutputStream(destinationFile)
-            inputStream?.copyTo(outputStream)
-            inputStream?.close()
-            outputStream.close()
+            // Use .use to auto-close streams
+            context.contentResolver.openInputStream(payload.asFile()!!.asUri()!!)?.use { inputStream ->
+                FileOutputStream(destinationFile).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
 
             // Update the submission object with the local file path
             val updatedAnswers = submission.answers.map {
@@ -448,9 +507,9 @@ class AptusTutorRepository @Inject constructor(
             assessmentDao.insertSubmission(updatedSubmission)
         } else {
             // ✅ It's a question image file for the STUDENT
-            val activeAssessment = _studentUiState.value.activeAssessment ?: return
+            val activeAssessment = _studentUiState.value.activeAssessment ?: return@withContext
 
-            val question = activeAssessment.questions.find { it.id == fileHeader.questionId } ?: return
+            val question = activeAssessment.questions.find { it.id == fileHeader.questionId } ?: return@withContext
 
             // Save the file locally on the student's device
             val destinationFile = File(context.filesDir, question.questionImageFile!!)
@@ -461,14 +520,17 @@ class AptusTutorRepository @Inject constructor(
             }
 
             // Update the state with the new local path to trigger UI recomposition
-            val updatedQuestions = activeAssessment.questions.map {
-                if (it.id == fileHeader.questionId) {
-                    it.copy(questionImageFile = destinationFile.absolutePath)
-                } else {
-                    it
+            // Switch to Main dispatcher to safely update UI state
+            withContext(Dispatchers.Main) {
+                val updatedQuestions = activeAssessment.questions.map {
+                    if (it.id == fileHeader.questionId) {
+                        it.copy(questionImageFile = destinationFile.absolutePath)
+                    } else {
+                        it
+                    }
                 }
+                _studentUiState.update { it.copy(activeAssessment = it.activeAssessment?.copy(questions = updatedQuestions)) }
             }
-            _studentUiState.update { it.copy(activeAssessment = it.activeAssessment?.copy(questions = updatedQuestions)) }
         }
     }
 
@@ -509,5 +571,10 @@ class AptusTutorRepository @Inject constructor(
 
     suspend fun switchUserRole(newRole: String) {
         userPreferencesRepository.switchUserRole(newRole)
+    }
+
+    fun errorShown() {
+        _studentUiState.update { it.copy(error = null) }
+        _tutorUiState.update { it.copy(error = null) }
     }
 }
