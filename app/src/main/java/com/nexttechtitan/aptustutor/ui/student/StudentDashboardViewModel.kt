@@ -61,6 +61,7 @@ class StudentDashboardViewModel @Inject constructor(
     }
 
     fun joinSession(session: DiscoveredSession, pin: String) {
+        stopDiscovery()
         viewModelScope.launch {
             repository.requestToJoinSession(session, pin)
         }
@@ -128,5 +129,9 @@ class StudentDashboardViewModel @Inject constructor(
             val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
             repository.switchUserRole(newRole)
         }
+    }
+
+    fun errorShown() {
+        repository.errorShown()
     }
 }
