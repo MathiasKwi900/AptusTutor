@@ -1,11 +1,22 @@
 package com.nexttechtitan.aptustutor.data
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
+
+data class SubmissionWithAssessment(
+    @Embedded val submission: AssessmentSubmission,
+    @Relation(
+        parentColumn = "assessmentId",
+        entityColumn = "id"
+    )
+    val assessment: Assessment
+)
 
 @Dao
 interface StudentProfileDao {
@@ -50,20 +61,6 @@ interface SessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun recordAttendance(attendance: SessionAttendance)
 
-    /**
-     * Corrected Query: This fetches the session details by looking through the
-     * attendance records for a given student. This is the correct way to get
-     * a student's session history.
-     */
-    @Transaction
-    @Query("""
-        SELECT S.* FROM sessions AS S
-        INNER JOIN session_attendance AS SA ON S.sessionId = SA.sessionId
-        WHERE SA.studentId = :studentId
-        ORDER BY S.sessionTimestamp DESC
-    """)
-    fun getSessionHistoryForStudent(studentId: String): Flow<List<Session>>
-
     @Transaction
     @Query("""
     SELECT * FROM sessions
@@ -73,6 +70,18 @@ interface SessionDao {
     ORDER BY sessionTimestamp DESC
 """)
     fun getSessionHistoryWithDetailsForStudent(studentId: String): Flow<List<SessionWithClassDetails>>
+
+    @Transaction
+    @Query("""
+    SELECT S.*, C.*,
+           (EXISTS (SELECT 1 FROM assessment_submissions AS SUB WHERE SUB.sessionId = S.sessionId AND SUB.studentId = :studentId)) as hasSubmission
+    FROM sessions AS S
+    INNER JOIN class_profiles AS C ON S.classId = C.classId
+    INNER JOIN session_attendance AS SA ON S.sessionId = SA.sessionId
+    WHERE SA.studentId = :studentId AND SA.status = 'Present'
+    ORDER BY S.sessionTimestamp DESC
+""")
+    fun getSessionHistoryForStudent(studentId: String): Flow<List<SessionHistoryItem>>
 }
 
 @Dao
@@ -98,4 +107,12 @@ interface AssessmentDao {
 
     @Query("SELECT * FROM assessment_submissions WHERE submissionId = :submissionId")
     fun getSubmissionFlow(submissionId: String): Flow<AssessmentSubmission?>
+
+    @Transaction
+    @Query("""
+    SELECT * FROM assessment_submissions
+    WHERE sessionId = :sessionId AND studentId = :studentId
+    LIMIT 1
+""")
+    fun getSubmissionWithAssessment(sessionId: String, studentId: String): Flow<SubmissionWithAssessment?>
 }

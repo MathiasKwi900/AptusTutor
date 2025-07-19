@@ -68,12 +68,6 @@ class TutorDashboardViewModel @Inject constructor(
         }
     }
 
-    fun startSession(classId: Long) {
-        viewModelScope.launch {
-            repository.startTutorSession(classId)
-        }
-    }
-
     fun stopSession() {
         repository.stopTutorSession()
     }
@@ -115,9 +109,27 @@ class TutorDashboardViewModel @Inject constructor(
         }
     }
 
+    fun startSession(classId: Long) {
+        viewModelScope.launch {
+            repository.startTutorSession(classId)
+                .onSuccess {
+                    _toastEvents.emit("Session started successfully.")
+                }
+                .onFailure {
+                    _toastEvents.emit("Error: Could not start session.")
+                }
+        }
+    }
+
     fun sendAssessment(assessmentBlueprint: AssessmentBlueprint) {
         viewModelScope.launch {
             repository.sendAssessmentToAllStudents(assessmentBlueprint)
+                .onSuccess {
+                    _toastEvents.emit("Assessment sent to class.")
+                }
+                .onFailure {
+                    _toastEvents.emit("Error: Failed to send assessment.")
+                }
         }
     }
 

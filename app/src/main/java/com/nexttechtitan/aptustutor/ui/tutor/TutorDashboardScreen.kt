@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -59,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +68,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -73,7 +76,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import com.google.accompanist.permissions.rememberPermissionState
 import com.nexttechtitan.aptustutor.data.AssessmentBlueprint
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
@@ -85,7 +90,9 @@ import com.nexttechtitan.aptustutor.data.TutorDashboardUiState
 import com.nexttechtitan.aptustutor.data.VerificationStatus
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import com.nexttechtitan.aptustutor.ui.student.ComposeFileProvider
+import com.nexttechtitan.aptustutor.utils.ImageUtils
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 
@@ -314,6 +321,7 @@ fun ActiveSessionScreen(
     val activeClass = uiState.activeClass!!.classProfile
     val rosterSize = uiState.activeClass!!.students.size
     val connectedCount = uiState.connectedStudents.size
+    val submissionCount = submissions.size
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(activeClass.className, style = MaterialTheme.typography.headlineMedium)
@@ -347,7 +355,13 @@ fun ActiveSessionScreen(
                 Tab(
                     selected = selectedTabIndex == index,
                     onClick = { selectedTabIndex = index },
-                    text = { Text(title) }
+                    text = {
+                        if (index == 1) {
+                            Text("$title ($submissionCount)")
+                        } else {
+                            Text(title)
+                        }
+                    }
                 )
             }
         }
@@ -371,7 +385,7 @@ fun LiveRosterTab(
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Pending Requests", style = MaterialTheme.typography.titleLarge)
-                if (uiState.connectionRequests.any { it.status == VerificationStatus.PIN_VERIFIED_PENDING_APPROVAL }) {
+                if (uiState.connectionRequests.count { it.status == VerificationStatus.PIN_VERIFIED_PENDING_APPROVAL } > 1) {
                     Button(onClick = onAcceptAll) { Text("Accept All") }
                 }
             }
@@ -431,9 +445,9 @@ fun CreateAssessmentDialog(
         title = { Text("Create New Assessment") },
         text = {
             Column(modifier = Modifier.fillMaxHeight(0.8f)) { // Limit height
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Assessment Title") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Assessment Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(value = duration, onValueChange = { duration = it.filter { c -> c.isDigit() } }, label = { Text("Duration (minutes)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = duration, onValueChange = { duration = it.filter { c -> c.isDigit() } }, label = { Text("Duration (minutes)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(Modifier.height(16.dp))
                 Text("Questions", style = MaterialTheme.typography.titleMedium)
                 HorizontalDivider()
@@ -473,11 +487,18 @@ fun CreateAssessmentDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val processedQuestions = questions.map { question ->
+                        if (question.questionImagePath != null && question.type == QuestionType.TEXT_INPUT) {
+                            question.copy(type = QuestionType.HANDWRITTEN_IMAGE)
+                        } else {
+                            question
+                        }
+                    }
                     val blueprint = AssessmentBlueprint(
                         sessionId = sessionId,
                         title = title,
                         durationInMinutes = duration.toIntOrNull() ?: 10,
-                        questions = questions.toList()
+                        questions = processedQuestions
                     )
                     onSend(blueprint)
                 },
@@ -492,6 +513,7 @@ fun CreateAssessmentDialog(
     )
 }
 
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun QuestionEditor(
     question: AssessmentQuestion,
@@ -527,6 +549,15 @@ fun QuestionEditor(
         }
     )
 
+    val cameraPermissionState = rememberPermissionState(permission = Manifest.permission.CAMERA)
+    LaunchedEffect(cameraPermissionState.status) {
+        if (cameraPermissionState.status.isGranted) {
+            val uri = ComposeFileProvider.getImageUri(context)
+            tempImageUri = uri
+            cameraLauncher.launch(uri)
+        }
+    }
+
     Card(modifier = Modifier.padding(vertical = 8.dp).border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
@@ -555,9 +586,13 @@ fun QuestionEditor(
                         Text("Pick Image")
                     }
                     OutlinedButton(onClick = {
-                        val uri = ComposeFileProvider.getImageUri(context)
-                        tempImageUri = uri
-                        cameraLauncher.launch(uri)
+                        if (cameraPermissionState.status.isGranted) {
+                            val uri = ComposeFileProvider.getImageUri(context)
+                            tempImageUri = uri
+                            cameraLauncher.launch(uri)
+                        } else {
+                            cameraPermissionState.launchPermissionRequest()
+                        }
                     }, modifier = Modifier.weight(1f)) {
                         Text("Take Photo")
                     }
@@ -565,17 +600,31 @@ fun QuestionEditor(
             }
             Spacer(Modifier.height(8.dp))
             Column {
-                OutlinedTextField(
-                    value = question.type.name.replace("_", " "),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Answer Type") },
-                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Dropdown") },
-                    modifier = Modifier.fillMaxWidth().clickable { dropdownExpanded = true }
-                )
-                DropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
-                    QuestionType.values().forEach { type ->
-                        DropdownMenuItem(text = { Text(type.name.replace("_", " ")) }, onClick = { onTypeChange(type); dropdownExpanded = false })
+                Box {
+                    OutlinedTextField(
+                        value = question.type.name.replace("_", " "),
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Answer Type") },
+                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Dropdown") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = true, onClick = { dropdownExpanded = true })
+                    )
+                    DropdownMenu(
+                        expanded = dropdownExpanded,
+                        onDismissRequest = { dropdownExpanded = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        QuestionType.entries.forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(type.name.replace("_", " ")) },
+                                onClick = {
+                                    onTypeChange(type)
+                                    dropdownExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
                 OutlinedTextField(
@@ -661,7 +710,11 @@ fun CreateClassDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
                 value = className,
                 onValueChange = { className = it },
                 label = { Text("Class Name (e.g., Physics 101)") },
-                singleLine = true
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Done
+                )
             )
         },
         confirmButton = {
@@ -699,10 +752,16 @@ fun StudentRequestCard(request: ConnectionRequest, onAccept: () -> Unit, onRejec
                 Text(request.studentName, fontWeight = FontWeight.Bold)
                 Text("Wants to join$statusText", style = MaterialTheme.typography.bodySmall)
             }
-            Row {
-                Button(onClick = onAccept) { Text("Accept") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = onReject) { Text("Reject") }
+            LazyRow {
+                item{
+                    Button(onClick = onAccept) { Text("Accept") }
+                }
+                item{
+                    Spacer(Modifier.width(8.dp))
+                }
+                item{
+                    OutlinedButton(onClick = onReject) { Text("Reject") }
+                }
             }
         }
     }

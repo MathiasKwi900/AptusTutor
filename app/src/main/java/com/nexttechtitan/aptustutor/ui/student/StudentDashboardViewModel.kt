@@ -9,15 +9,18 @@ import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
 import com.nexttechtitan.aptustutor.data.QuestionType
+import com.nexttechtitan.aptustutor.data.SessionHistoryItem
 import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -37,11 +40,14 @@ class StudentDashboardViewModel @Inject constructor(
     val timeLeft = _timeLeft.asStateFlow()
     private var timerJob: Job? = null
 
+    private val _events = MutableSharedFlow<String>()
+    val events = _events.asSharedFlow()
+
     val textAnswers = mutableStateMapOf<String, String>()
     val imageAnswers = mutableStateMapOf<String, Uri>()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val sessionHistory: StateFlow<List<SessionWithClassDetails>> =
+    val sessionHistory: StateFlow<List<SessionHistoryItem>> =
         userPreferencesRepository.userIdFlow.flatMapLatest { studentId ->
             repository.getSessionHistoryForStudent(studentId ?: "")
         }.stateIn(
@@ -62,6 +68,7 @@ class StudentDashboardViewModel @Inject constructor(
 
     fun joinSession(session: DiscoveredSession, pin: String) {
         stopDiscovery()
+        repository.setJoiningState(session.sessionId)
         viewModelScope.launch {
             repository.requestToJoinSession(session, pin)
         }
@@ -118,7 +125,7 @@ class StudentDashboardViewModel @Inject constructor(
             )
 
             repository.submitAssessment(submission, imageAnswers)
-            // Reset state after submission
+            _events.emit("Assessment submitted successfully!")
             repository.clearActiveAssessmentForStudent()
         }
     }
@@ -129,6 +136,10 @@ class StudentDashboardViewModel @Inject constructor(
             val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
             repository.switchUserRole(newRole)
         }
+    }
+
+    fun leaveSession() {
+        repository.disconnectFromSession()
     }
 
     fun errorShown() {

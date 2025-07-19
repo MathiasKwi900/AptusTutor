@@ -14,6 +14,9 @@ import java.util.Locale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -22,7 +25,10 @@ import androidx.navigation.NavHostController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
+import com.nexttechtitan.aptustutor.data.SessionHistoryItem
 import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
+import com.nexttechtitan.aptustutor.data.StudentDashboardUiState
+import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SettingsMenu
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -39,6 +45,7 @@ fun StudentDashboardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    var showLeaveDialog by remember { mutableStateOf(false) }
     var userWantsToDiscover by remember { mutableStateOf(false) }
     val requiredPermissions = remember {
         when {
@@ -67,6 +74,15 @@ fun StudentDashboardScreen(
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.BLUETOOTH,
                 Manifest.permission.BLUETOOTH_ADMIN
+            )
+        }
+    }
+
+    LaunchedEffect(key1 = Unit) {
+        viewModel.events.collect { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short
             )
         }
     }
@@ -132,31 +148,55 @@ fun StudentDashboardScreen(
             modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            DiscoveryCard(
-                isDiscovering = uiState.isDiscovering || userWantsToDiscover,
-                onToggleDiscovery = { isChecked ->
-                    if (isChecked) {
-                        userWantsToDiscover = true
-                        Log.d("AptusTutorDebug", "[STUDENT UI] Discovery toggled ON. Checking permissions...")
-                        if (permissionState.allPermissionsGranted) {
-                            Log.d("AptusTutorDebug", "[STUDENT UI] Permissions are granted. Starting discovery.")
-                            viewModel.startDiscovery()
-                        } else {
-                            Log.d("AptusTutorDebug", "[STUDENT UI] Permissions not granted. Launching request dialog.")
-                            permissionState.launchMultiplePermissionRequest()
-                        }
-                    } else {
-                        Log.d("AptusTutorDebug", "[STUDENT UI] Discovery toggled OFF. Stopping discovery.")
-                        userWantsToDiscover = false
-                        viewModel.stopDiscovery()
-                    }
+            val isConnected = uiState.connectionStatus == "Connected" && uiState.connectedSession != null
+            LaunchedEffect(isConnected) {
+                if (isConnected) {
+                    userWantsToDiscover = false
+                    viewModel.stopDiscovery()
                 }
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "Status: ${uiState.connectionStatus}",
-                style = MaterialTheme.typography.titleMedium
-            )
+            }
+            if (isConnected) {
+                ConnectedInfoCard(session = uiState.connectedSession!!, onLeaveClicked = { showLeaveDialog = true })
+            } else {
+                DiscoveryCard(
+                    isDiscovering = uiState.isDiscovering || userWantsToDiscover,
+                    onToggleDiscovery = { isChecked ->
+                        if (isChecked) {
+                            userWantsToDiscover = true
+                            Log.d(
+                                "AptusTutorDebug",
+                                "[STUDENT UI] Discovery toggled ON. Checking permissions..."
+                            )
+                            if (permissionState.allPermissionsGranted) {
+                                Log.d(
+                                    "AptusTutorDebug",
+                                    "[STUDENT UI] Permissions are granted. Starting discovery."
+                                )
+                                viewModel.startDiscovery()
+                            } else {
+                                Log.d(
+                                    "AptusTutorDebug",
+                                    "[STUDENT UI] Permissions not granted. Launching request dialog."
+                                )
+                                permissionState.launchMultiplePermissionRequest()
+                            }
+                        } else {
+                            Log.d(
+                                "AptusTutorDebug",
+                                "[STUDENT UI] Discovery toggled OFF. Stopping discovery."
+                            )
+                            userWantsToDiscover = false
+                            viewModel.stopDiscovery()
+                        }
+                    }
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Status: ${uiState.connectionStatus}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
@@ -172,7 +212,11 @@ fun StudentDashboardScreen(
                     }
                 }
                 items(uiState.discoveredSessions) { session ->
-                    SessionCard(session = session, onJoin = { sessionToJoin = session })
+                    SessionCard(
+                        session = session,
+                        uiState = uiState,
+                        onJoin = { sessionToJoin = session }
+                    )
                 }
                 item {
                     Text(
@@ -186,8 +230,11 @@ fun StudentDashboardScreen(
                         Text("Your past sessions will appear here once you've been marked present in a class.")
                     }
                 } else {
-                    items(history) { sessionDetails ->
-                        HistoryCard(sessionDetails = sessionDetails)
+                    items(history) { sessionHistoryItem ->
+                        HistoryCard(
+                            sessionHistoryItem = sessionHistoryItem,
+                            navController = navController // Pass the NavController
+                        )
                     }
                 }
             }
@@ -198,10 +245,69 @@ fun StudentDashboardScreen(
                 session = session,
                 onDismiss = { sessionToJoin = null },
                 onConfirm = { pin ->
+                    userWantsToDiscover = false
                     viewModel.joinSession(session, pin)
                     sessionToJoin = null
                 }
             )
+        }
+        if (showLeaveDialog) {
+            AlertDialog(
+                onDismissRequest = { showLeaveDialog = false },
+                title = { Text("Leave Session?") },
+                text = { Text("Are you sure you want to disconnect from the current session?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.leaveSession()
+                            showLeaveDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Leave")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLeaveDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectedInfoCard(session: DiscoveredSession, onLeaveClicked: () -> Unit) {
+    Card(
+        elevation = CardDefaults.cardElevation(2.dp),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "You are connected to:",
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                session.className,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Tutor: ${session.tutorName}",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            OutlinedButton(
+                onClick = onLeaveClicked,
+                modifier = Modifier.padding(top = 8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Leave Session")
+            }
         }
     }
 }
@@ -220,7 +326,13 @@ fun JoinSessionDialog(
             Column {
                 Text("Your tutor will provide a 4-digit PIN to join the session.")
                 Spacer(Modifier.height(16.dp))
-                OutlinedTextField(value = pin, onValueChange = { pin = it }, label = { Text("Class PIN") })
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { if (it.length <= 4) pin = it.filter { c -> c.isDigit() } },
+                    label = { Text("Class PIN") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true
+                )
             }
         },
         confirmButton = { Button(onClick = { onConfirm(pin) }, enabled = pin.length == 4) { Text("Join") } }
@@ -228,14 +340,30 @@ fun JoinSessionDialog(
 }
 
 @Composable
-fun SessionCard(session: DiscoveredSession, onJoin: () -> Unit) {
+fun SessionCard(
+    session: DiscoveredSession,
+    uiState: StudentDashboardUiState,
+    onJoin: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text(session.className, fontWeight = FontWeight.Bold)
                 Text("Tutor: ${session.tutorName}", style = MaterialTheme.typography.bodySmall)
             }
-            Button(onClick = onJoin) { Text("Join") }
+            val isConnectedToThisSession = uiState.connectedSession?.sessionId == session.sessionId
+            val isJoiningThisSession = uiState.joiningSessionId == session.sessionId
+
+            Button(
+                onClick = onJoin,
+                enabled = !isConnectedToThisSession && !isJoiningThisSession
+            ) {
+                when {
+                    isConnectedToThisSession -> Text("Joined")
+                    isJoiningThisSession -> Text("Joining...")
+                    else -> Text("Join")
+                }
+            }
         }
     }
 }
@@ -261,16 +389,16 @@ private fun DiscoveryCard(isDiscovering: Boolean, onToggleDiscovery: (Boolean) -
 }
 
 @Composable
-fun HistoryCard(sessionDetails: SessionWithClassDetails) {
+fun HistoryCard(sessionHistoryItem: SessionHistoryItem, navController: NavHostController) {
     val formatter = remember {
         SimpleDateFormat("EEE, d MMM yyyy 'at' hh:mm a", Locale.getDefault())
     }
+    val sessionDetails = sessionHistoryItem.sessionWithDetails
 
     Card(modifier = Modifier
         .fillMaxWidth()
         .padding(vertical = 4.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // We can now access the class name!
             Text(
                 text = sessionDetails.classProfile.className,
                 style = MaterialTheme.typography.titleMedium,
@@ -285,6 +413,17 @@ fun HistoryCard(sessionDetails: SessionWithClassDetails) {
                     text = "Duration: ${calculateDuration(sessionDetails.session.sessionTimestamp, sessionDetails.session.endTime!!)}",
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+            if (sessionHistoryItem.hasSubmission) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        navController.navigate("${AptusTutorScreen.SubmissionResult.name}/${sessionDetails.session.sessionId}")
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("View Results")
+                }
             }
         }
     }
