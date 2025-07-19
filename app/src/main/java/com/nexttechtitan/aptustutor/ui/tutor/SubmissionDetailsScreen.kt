@@ -40,7 +40,12 @@ fun SubmissionDetailsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val submission = uiState.submission
     val assessment = uiState.assessment
+    val draftAnswers = uiState.draftAnswers
     var showFeedbackSentDialog by remember { mutableStateOf(false) }
+
+    val isGradingComplete = submission?.answers?.all { answer ->
+        answer.score != null && answer.feedback?.isNotBlank() == true
+    } ?: false
 
     Scaffold(
         topBar = {
@@ -48,10 +53,13 @@ fun SubmissionDetailsScreen(
                 title = { Text(submission?.studentName ?: "Loading...") },
                 navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = {
-                        viewModel.sendFeedback()
-                        showFeedbackSentDialog = true
-                    }) {
+                    IconButton(
+                        onClick = {
+                            viewModel.sendFeedback()
+                            showFeedbackSentDialog = true
+                        },
+                        enabled = isGradingComplete
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send Feedback to Student")
                     }
                 }
@@ -73,12 +81,20 @@ fun SubmissionDetailsScreen(
                 Text(assessment.title, style = MaterialTheme.typography.headlineSmall)
             }
             itemsIndexed(assessment.questions) { index, question ->
-                val answer = submission.answers.find { it.questionId == question.id }
+                val answer = draftAnswers[question.id]
                 GradedAnswerCard(
                     questionIndex = index,
                     question = question,
                     answer = answer,
-                    onSaveGrade = viewModel::saveGrade
+                    onScoreChange = { newScore ->
+                        viewModel.onScoreChange(question.id, newScore)
+                    },
+                    onFeedbackChange = { newFeedback ->
+                        viewModel.onFeedbackChange(question.id, newFeedback)
+                    },
+                    onSaveGrade = {
+                        viewModel.saveGrade(question.id)
+                    }
                 )
             }
         }
@@ -99,10 +115,10 @@ fun GradedAnswerCard(
     questionIndex: Int,
     question: AssessmentQuestion,
     answer: AssessmentAnswer?,
-    onSaveGrade: (questionId: String, score: Int, feedback: String) -> Unit
+    onScoreChange: (String) -> Unit,
+    onFeedbackChange: (String) -> Unit,
+    onSaveGrade: () -> Unit
 ) {
-    var score by remember { mutableStateOf(answer?.score?.toString() ?: "") }
-    var feedback by remember { mutableStateOf(answer?.feedback ?: "") }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
@@ -139,23 +155,19 @@ fun GradedAnswerCard(
             Text("Grading", style = MaterialTheme.typography.titleMedium)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    value = score,
-                    onValueChange = { score = it.filter { c -> c.isDigit() } },
+                    value = answer?.score?.toString() ?: "",
+                    onValueChange = onScoreChange,
                     label = { Text("Score") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.weight(1f)
+                    singleLine = true,
+                    modifier = Modifier.width(100.dp)
                 )
                 Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = { onSaveGrade(question.id, score.toIntOrNull() ?: 0, feedback) },
-                    enabled = score.isNotBlank() || feedback.isNotBlank()
-                ) {
-                    Text("Save")
-                }
+                Button(onClick = onSaveGrade) { Text("Save") }
             }
             OutlinedTextField(
-                value = feedback,
-                onValueChange = { feedback = it },
+                value = answer?.feedback ?: "",
+                onValueChange = onFeedbackChange,
                 label = { Text("Feedback / Correction") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             )

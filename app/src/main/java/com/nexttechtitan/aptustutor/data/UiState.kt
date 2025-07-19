@@ -1,6 +1,7 @@
 // File: data/UiState.kt
 package com.nexttechtitan.aptustutor.data
 
+import androidx.room.Embedded
 import java.util.UUID
 
 // --- Data for UI display ---
@@ -53,6 +54,7 @@ data class StudentDashboardUiState(
     val discoveredSessions: List<DiscoveredSession> = emptyList(),
     val connectedSession: DiscoveredSession? = null,
     val connectionStatus: String = "Idle",
+    val joiningSessionId: String? = null,
     val activeAssessment: AssessmentForStudent? = null,
     val error: String? = null
 )
@@ -78,4 +80,10 @@ data class AssessmentAnswer(
     var imageFilePath: String? = null,
     var score: Int? = null,
     var feedback: String? = null
+)
+
+data class SessionHistoryItem(
+    @Embedded
+    val sessionWithDetails: SessionWithClassDetails,
+    val hasSubmission: Boolean
 )

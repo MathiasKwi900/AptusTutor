@@ -20,6 +20,7 @@ import com.nexttechtitan.aptustutor.ui.roleselection.RoleSelectionScreen
 import com.nexttechtitan.aptustutor.ui.student.AssessmentScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardViewModel
+import com.nexttechtitan.aptustutor.ui.student.SubmissionResultScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SubmissionDetailsScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorDashboardScreen
 
@@ -30,7 +31,8 @@ enum class AptusTutorScreen {
     TutorDashboard,
     StudentDashboard,
     AssessmentScreen,
-    SubmissionDetailsScreen
+    SubmissionDetailsScreen,
+    SubmissionResult
 }
 
 @Composable
@@ -104,6 +106,12 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
                     navController.popBackStack(AptusTutorScreen.StudentDashboard.name, inclusive = false)
                 }
             )
+        }
+        composable(
+            route = "${AptusTutorScreen.SubmissionResult.name}/{sessionId}",
+            arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+        ) {
+            SubmissionResultScreen(onNavigateBack = { navController.popBackStack() })
         }
     }
 }
