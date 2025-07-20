@@ -36,11 +36,10 @@ data class PayloadWrapper(
     val jsonData: String
 )
 
-// A specific header sent right before an image file
-data class FileHeader(
+data class EmbeddedFileHeader(
     val sessionId: String,
-    val submissionId: String? = null,
-    val questionId: String
+    val questionId: String,
+    val submissionId: String? = null
 )
 
 data class SessionEndPayload(

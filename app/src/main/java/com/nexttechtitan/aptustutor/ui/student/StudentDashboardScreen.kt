@@ -3,19 +3,57 @@ package com.nexttechtitan.aptustutor.ui.student
 import android.Manifest
 import android.os.Build
 import android.util.Log
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.HistoryEdu
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.SignalWifiOff
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -26,10 +64,12 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
 import com.nexttechtitan.aptustutor.data.SessionHistoryItem
-import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
 import com.nexttechtitan.aptustutor.data.StudentDashboardUiState
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SettingsMenu
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -39,6 +79,7 @@ fun StudentDashboardScreen(
     viewModel: StudentDashboardViewModel = hiltViewModel(),
     navController: NavHostController
 ) {
+    // --- BATTLE-TESTED LOGIC BLOCK (PRESERVED EXACTLY) ---
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.sessionHistory.collectAsStateWithLifecycle()
     var sessionToJoin by remember { mutableStateOf<DiscoveredSession?>(null) }
@@ -58,7 +99,6 @@ fun StudentDashboardScreen(
                 Manifest.permission.BLUETOOTH_ADVERTISE,
                 Manifest.permission.BLUETOOTH_CONNECT,
             )
-
             // Android 12 (API 31 & 32)
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -68,7 +108,6 @@ fun StudentDashboardScreen(
                 Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.ACCESS_FINE_LOCATION,
             )
-
             else -> listOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -134,112 +173,128 @@ fun StudentDashboardScreen(
             viewModel.errorShown()
         }
     }
+    // --- END OF PRESERVED LOGIC BLOCK ---
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { Text("Student Dashboard") },
-                actions = { SettingsMenu(onSwitchRole = viewModel::switchUserRole, navController = navController) }
+                actions = { SettingsMenu(onSwitchRole = viewModel::switchUserRole, navController = navController) },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.surface
     ) { paddingValues ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
+        // The main layout is a single LazyColumn for better performance and a unified scroll experience.
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val isConnected = uiState.connectionStatus == "Connected" && uiState.connectedSession != null
-            LaunchedEffect(isConnected) {
+            // --- DYNAMIC HUB: Shows connection status or discovery tools ---
+            item {
+                val isConnected = uiState.connectionStatus == "Connected" && uiState.connectedSession != null
+                // This LaunchedEffect is from your original logic to manage state transitions
+                LaunchedEffect(isConnected) {
+                    if (isConnected) {
+                        userWantsToDiscover = false
+                        viewModel.stopDiscovery()
+                    }
+                }
+
                 if (isConnected) {
-                    userWantsToDiscover = false
-                    viewModel.stopDiscovery()
-                }
-            }
-            if (isConnected) {
-                ConnectedInfoCard(session = uiState.connectedSession!!, onLeaveClicked = { showLeaveDialog = true })
-            } else {
-                DiscoveryCard(
-                    isDiscovering = uiState.isDiscovering || userWantsToDiscover,
-                    onToggleDiscovery = { isChecked ->
-                        if (isChecked) {
-                            userWantsToDiscover = true
-                            Log.d(
-                                "AptusTutorDebug",
-                                "[STUDENT UI] Discovery toggled ON. Checking permissions..."
-                            )
-                            if (permissionState.allPermissionsGranted) {
-                                Log.d(
-                                    "AptusTutorDebug",
-                                    "[STUDENT UI] Permissions are granted. Starting discovery."
-                                )
-                                viewModel.startDiscovery()
-                            } else {
-                                Log.d(
-                                    "AptusTutorDebug",
-                                    "[STUDENT UI] Permissions not granted. Launching request dialog."
-                                )
-                                permissionState.launchMultiplePermissionRequest()
-                            }
-                        } else {
-                            Log.d(
-                                "AptusTutorDebug",
-                                "[STUDENT UI] Discovery toggled OFF. Stopping discovery."
-                            )
-                            userWantsToDiscover = false
-                            viewModel.stopDiscovery()
-                        }
-                    }
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Status: ${uiState.connectionStatus}",
-                    style = MaterialTheme.typography.titleMedium
-                )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
-
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                item {
-                    Text("Nearby Classes", style = MaterialTheme.typography.titleLarge)
-                }
-                if (uiState.discoveredSessions.isEmpty() && uiState.isDiscovering) {
-                    item {
-                        Text(
-                            "Searching for classes...",
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                    }
-                }
-                items(uiState.discoveredSessions) { session ->
-                    SessionCard(
-                        session = session,
-                        uiState = uiState,
-                        onJoin = { sessionToJoin = session }
+                    ConnectedInfoCard(
+                        session = uiState.connectedSession!!,
+                        onLeaveClicked = { showLeaveDialog = true }
                     )
-                }
-                item {
-                    Text(
-                        "My Attendance History",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
-                    )
-                }
-                if (history.isEmpty()) {
-                    item {
-                        Text("Your past sessions will appear here once you've been marked present in a class.")
-                    }
                 } else {
-                    items(history) { sessionHistoryItem ->
+                    DiscoveryCard(
+                        isDiscovering = uiState.isDiscovering || userWantsToDiscover,
+                        onToggleDiscovery = { isChecked ->
+                            if (isChecked) {
+                                userWantsToDiscover = true
+                                if (permissionState.allPermissionsGranted) {
+                                    viewModel.startDiscovery()
+                                } else {
+                                    permissionState.launchMultiplePermissionRequest()
+                                }
+                            } else {
+                                userWantsToDiscover = false
+                                viewModel.stopDiscovery()
+                            }
+                        }
+                    )
+                }
+            }
+
+            // --- NEARBY CLASSES SECTION ---
+            item {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+                    Text("Nearby Classes", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+
+            if (uiState.discoveredSessions.isEmpty()) {
+                item {
+                    EmptyState(
+                        icon = if (uiState.isDiscovering) Icons.Rounded.SignalWifiOff else Icons.Rounded.SignalWifiOff,
+                        headline = if (uiState.isDiscovering) "Searching..." else "No Classes Found",
+                        subline = if (uiState.isDiscovering) "Looking for tutors in your area. This may take a moment." else "Once a tutor starts a session nearby, it will appear here."
+                    )
+                }
+            } else {
+                items(uiState.discoveredSessions, key = { it.sessionId }) { session ->
+                    Column(Modifier.padding(horizontal = 16.dp)) {
+                        SessionCard(
+                            session = session,
+                            uiState = uiState,
+                            onJoin = { sessionToJoin = session }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            }
+
+
+            // --- ATTENDANCE HISTORY SECTION ---
+            item {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+                    Text("My Attendance History", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+
+            if (history.isEmpty()) {
+                item {
+                    EmptyState(
+                        icon = Icons.Rounded.HistoryEdu,
+                        headline = "No History Yet",
+                        subline = "Your attended classes and assessment results will appear here."
+                    )
+                }
+            } else {
+                items(history, key = { it.sessionWithDetails.session.sessionId }) { sessionHistoryItem ->
+                    Column(Modifier.padding(horizontal = 16.dp)) {
                         HistoryCard(
                             sessionHistoryItem = sessionHistoryItem,
-                            navController = navController // Pass the NavController
+                            onViewResultsClicked = {
+                                navController.navigate("${AptusTutorScreen.SubmissionResult.name}/${sessionHistoryItem.sessionWithDetails.session.sessionId}")
+                            }
                         )
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
             }
         }
 
+        // --- DIALOGS (Wired to original logic) ---
         sessionToJoin?.let { session ->
             JoinSessionDialog(
                 session = session,
@@ -251,60 +306,66 @@ fun StudentDashboardScreen(
                 }
             )
         }
+
         if (showLeaveDialog) {
-            AlertDialog(
-                onDismissRequest = { showLeaveDialog = false },
-                title = { Text("Leave Session?") },
-                text = { Text("Are you sure you want to disconnect from the current session?") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            viewModel.leaveSession()
-                            showLeaveDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Leave")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showLeaveDialog = false }) {
-                        Text("Cancel")
-                    }
+            LeaveSessionDialog(
+                onDismiss = { showLeaveDialog = false },
+                onConfirm = {
+                    viewModel.leaveSession()
+                    showLeaveDialog = false
                 }
             )
         }
     }
 }
 
+
 @Composable
 private fun ConnectedInfoCard(session: DiscoveredSession, onLeaveClicked: () -> Unit) {
     Card(
-        elevation = CardDefaults.cardElevation(2.dp),
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        modifier = Modifier
+            .fillMaxWidth()
+            // ENHANCEMENT: Reduced vertical padding to make the card more compact.
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            // ENHANCEMENT: Rebalanced padding and added Arrangement.spacedBy for consistent, centered spacing.
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // UX FIX: The checkmark icon has been removed to avoid user confusion.
             Text(
-                "You are connected to:",
-                style = MaterialTheme.typography.titleMedium
+                "Connected to Session",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                session.className,
+                // The class name is now the primary headline for clear focus.
+                text = session.className,
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                textAlign = TextAlign.Center
             )
             Text(
                 "Tutor: ${session.tutorName}",
-                style = MaterialTheme.typography.bodyLarge
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
-            OutlinedButton(
+            // A small spacer adds breathing room before the action button.
+            Spacer(Modifier.height(8.dp))
+            Button(
                 onClick = onLeaveClicked,
-                modifier = Modifier.padding(top = 8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )
             ) {
                 Text("Leave Session")
             }
@@ -313,43 +374,55 @@ private fun ConnectedInfoCard(session: DiscoveredSession, onLeaveClicked: () -> 
 }
 
 @Composable
-fun JoinSessionDialog(
-    session: DiscoveredSession,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var pin by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Join '${session.className}'") },
-        text = {
-            Column {
-                Text("Your tutor will provide a 4-digit PIN to join the session.")
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = pin,
-                    onValueChange = { if (it.length <= 4) pin = it.filter { c -> c.isDigit() } },
-                    label = { Text("Class PIN") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    singleLine = true
+private fun DiscoveryCard(isDiscovering: Boolean, onToggleDiscovery: (Boolean) -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Find a Class", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (isDiscovering) "Searching for nearby tutors..." else "Discovery is off",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        },
-        confirmButton = { Button(onClick = { onConfirm(pin) }, enabled = pin.length == 4) { Text("Join") } }
-    )
+            // ENHANCEMENT: Themed Switch colors for better brand consistency and visual feedback.
+            Switch(
+                checked = isDiscovering,
+                onCheckedChange = onToggleDiscovery,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                    uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                    uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            )
+        }
+    }
 }
 
 @Composable
-fun SessionCard(
-    session: DiscoveredSession,
-    uiState: StudentDashboardUiState,
-    onJoin: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text(session.className, fontWeight = FontWeight.Bold)
-                Text("Tutor: ${session.tutorName}", style = MaterialTheme.typography.bodySmall)
+fun SessionCard(session: DiscoveredSession, uiState: StudentDashboardUiState, onJoin: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(session.className, style = MaterialTheme.typography.titleMedium)
+                Text("Tutor: ${session.tutorName}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val isConnectedToThisSession = uiState.connectedSession?.sessionId == session.sessionId
             val isJoiningThisSession = uiState.joiningSessionId == session.sessionId
@@ -369,57 +442,37 @@ fun SessionCard(
 }
 
 @Composable
-private fun DiscoveryCard(isDiscovering: Boolean, onToggleDiscovery: (Boolean) -> Unit) {
-    Card(elevation = CardDefaults.cardElevation(2.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column {
-                Text("Find a Class", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (isDiscovering) "Searching for nearby tutors..." else "Discovery is off.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Switch(checked = isDiscovering, onCheckedChange = onToggleDiscovery)
-        }
-    }
-}
-
-@Composable
-fun HistoryCard(sessionHistoryItem: SessionHistoryItem, navController: NavHostController) {
-    val formatter = remember {
-        SimpleDateFormat("EEE, d MMM yyyy 'at' hh:mm a", Locale.getDefault())
-    }
+fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: () -> Unit) {
+    val formatter = remember { SimpleDateFormat("EEE, d MMM yyyy 'at' hh:mm a", Locale.getDefault()) }
     val sessionDetails = sessionHistoryItem.sessionWithDetails
 
-    Card(modifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 4.dp)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = sessionDetails.classProfile.className,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.titleMedium
             )
             Text(
                 text = "Attended: ${formatter.format(Date(sessionDetails.session.sessionTimestamp))}",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (sessionDetails.session.endTime != null) {
                 Text(
                     text = "Duration: ${calculateDuration(sessionDetails.session.sessionTimestamp, sessionDetails.session.endTime!!)}",
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             if (sessionHistoryItem.hasSubmission) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        navController.navigate("${AptusTutorScreen.SubmissionResult.name}/${sessionDetails.session.sessionId}")
-                    },
+                // ENHANCEMENT: Using a FilledTonalButton gives this action more weight than an OutlinedButton
+                // without being as loud as a primary Button. Perfect for secondary positive actions.
+                FilledTonalButton(
+                    onClick = onViewResultsClicked,
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text("View Results")
@@ -429,9 +482,78 @@ fun HistoryCard(sessionHistoryItem: SessionHistoryItem, navController: NavHostCo
     }
 }
 
+@Composable
+fun JoinSessionDialog(session: DiscoveredSession, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Link, contentDescription = null) },
+        title = { Text("Join '${session.className}'") },
+        text = {
+            Column {
+                Text("Your tutor will provide a 4-digit PIN to join the session.")
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { if (it.length <= 4) pin = it.filter { c -> c.isDigit() } },
+                    label = { Text("Class PIN") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { onConfirm(pin) }, enabled = pin.length == 4) { Text("Join") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun LeaveSessionDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Leave Session?") },
+        text = { Text("Are you sure you want to disconnect from the current session?") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Leave")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun EmptyState(icon: ImageVector, headline: String, subline: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = headline,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        )
+        Text(text = headline, style = MaterialTheme.typography.titleLarge)
+        Text(
+            text = subline,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 24.dp)
+        )
+    }
+}
+
 private fun calculateDuration(start: Long, end: Long): String {
     val durationMillis = end - start
     val minutes = (durationMillis / 1000) / 60
     return if (minutes < 1) "Less than a minute" else "$minutes min"
 }
-
