@@ -5,18 +5,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nexttechtitan.aptustutor.data.AptusTutorRepository
 import com.nexttechtitan.aptustutor.data.Assessment
+import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import androidx.compose.runtime.mutableStateMapOf
-import com.nexttechtitan.aptustutor.data.AssessmentAnswer
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -33,64 +32,71 @@ class SubmissionDetailsViewModel @Inject constructor(
 ) : ViewModel() {
     private val submissionId: String = savedStateHandle.get("submissionId")!!
 
-    private val _draftAnswersFlow = MutableStateFlow<Map<String, AssessmentAnswer>>(emptyMap())
+    private val _toastEvents = MutableSharedFlow<String>()
+    val toastEvents = _toastEvents.asSharedFlow()
 
-    val uiState: StateFlow<SubmissionDetailsUiState> = combine(
-        repository.getSubmissionFlow(submissionId),
-        repository.getAssessmentFlow(submissionId),
-        _draftAnswersFlow // Combine the draft state flow
-    ) { submission, assessment, draftAnswers ->
-        // Initialize drafts the first time the submission loads
-        if (submission != null && draftAnswers.isEmpty()) {
-            _draftAnswersFlow.value = submission.answers.associateBy { it.questionId }
-        }
-        SubmissionDetailsUiState(
-            submission = submission,
-            assessment = assessment,
-            draftAnswers = draftAnswers
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = SubmissionDetailsUiState()
-    )
+    private val _uiState = MutableStateFlow(SubmissionDetailsUiState())
+    val uiState: StateFlow<SubmissionDetailsUiState> = _uiState
+
+    init {
+        repository.getSubmissionFlow(submissionId)
+            .filterNotNull()
+            .onEach { dbSubmission ->
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        submission = dbSubmission,
+                        draftAnswers = dbSubmission.answers.associateBy { it.questionId }
+                    )
+                }
+            }
+            .launchIn(viewModelScope)
+
+        repository.getAssessmentFlow(submissionId)
+            .onEach { assessment ->
+                _uiState.update { it.copy(assessment = assessment) }
+            }
+            .launchIn(viewModelScope)
+    }
 
     fun onScoreChange(questionId: String, newScore: String) {
-        val currentAnswers = _draftAnswersFlow.value.toMutableMap()
-        currentAnswers[questionId]?.let {
-            currentAnswers[questionId] = it.copy(score = newScore.toIntOrNull())
-            _draftAnswersFlow.value = currentAnswers
+        _uiState.update { currentState ->
+            val newDrafts = currentState.draftAnswers.toMutableMap()
+            newDrafts[questionId]?.let {
+                newDrafts[questionId] = it.copy(score = newScore.toIntOrNull())
+            }
+            currentState.copy(draftAnswers = newDrafts)
         }
     }
 
     fun onFeedbackChange(questionId: String, newFeedback: String) {
-        val currentAnswers = _draftAnswersFlow.value.toMutableMap()
-        currentAnswers[questionId]?.let {
-            currentAnswers[questionId] = it.copy(feedback = newFeedback)
-            _draftAnswersFlow.value = currentAnswers
+        _uiState.update { currentState ->
+            val newDrafts = currentState.draftAnswers.toMutableMap()
+            newDrafts[questionId]?.let {
+                newDrafts[questionId] = it.copy(feedback = newFeedback)
+            }
+            currentState.copy(draftAnswers = newDrafts)
         }
     }
 
     fun saveGrade(questionId: String) {
         viewModelScope.launch {
-            val answerToSave = _draftAnswersFlow.value[questionId]
-            // Only save if the score and feedback are valid
-            if (answerToSave?.score != null && answerToSave.feedback != null) {
+            val answerToSave = _uiState.value.draftAnswers[questionId]
+            if (answerToSave?.score != null && answerToSave.feedback?.isNotBlank() == true) {
                 repository.saveManualGrade(
                     submissionId = submissionId,
                     questionId = questionId,
                     score = answerToSave.score!!,
                     feedback = answerToSave.feedback!!
                 )
+                _toastEvents.emit("Grade saved successfully")
             }
         }
     }
 
     fun sendFeedback() {
         viewModelScope.launch {
-            uiState.value.submission?.let {
-                // Ensure the submission being sent has the latest draft answers
-                val updatedSubmission = it.copy(answers = _draftAnswersFlow.value.values.toList())
+            _uiState.value.submission?.let {
+                val updatedSubmission = it.copy(answers = _uiState.value.draftAnswers.values.toList())
                 repository.sendFeedbackToStudent(updatedSubmission)
             }
         }

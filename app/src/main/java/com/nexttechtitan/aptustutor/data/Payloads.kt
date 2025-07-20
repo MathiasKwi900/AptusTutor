@@ -38,6 +38,13 @@ data class PayloadWrapper(
 
 // A specific header sent right before an image file
 data class FileHeader(
+    val sessionId: String,
     val submissionId: String? = null,
     val questionId: String
+)
+
+data class SessionEndPayload(
+    val session: Session,
+    val classProfile: ClassProfile,
+    val attendance: SessionAttendance
 )
