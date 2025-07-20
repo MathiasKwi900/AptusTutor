@@ -178,24 +178,14 @@ fun QuestionCard(
                 Text(question.text, style = MaterialTheme.typography.bodyLarge)
                 question.questionImageFile?.let { imagePath ->
                     Spacer(Modifier.height(8.dp))
-                    // Check if it's a full path (already downloaded) or just a filename (pending)
                     val imageFile = File(imagePath)
-                    if (imageFile.exists()) {
-                        val cacheBuster = imageFile.lastModified()
-                        val imageRequest = ImageRequest.Builder(LocalContext.current)
-                            .data(imageFile)
-                            // include the last‑modified timestamp so the key changes whenever the file does
-                            .diskCacheKey("$imagePath‑$cacheBuster")
-                            .memoryCacheKey("$imagePath‑$cacheBuster")
-                            // make sure Coil actually uses your custom keys
-                            .diskCachePolicy(CachePolicy.ENABLED)
-                            .memoryCachePolicy(CachePolicy.ENABLED)
-                            // turn on the crossfade animation
-                            .crossfade(true)
-                            .build()
-
+                    if (imageFile.exists() && imageFile.isFile) {
                         AsyncImage(
-                            model = imageRequest,
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(imageFile)
+                                .crossfade(true)
+                                .memoryCacheKey(imageFile.path + imageFile.lastModified())
+                                .build(),
                             contentDescription = "Question Image",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -216,44 +206,49 @@ fun QuestionCard(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Spacer(Modifier.height(16.dp))
 
-                when (question.type) {
-                    QuestionType.TEXT_INPUT -> {
-                        OutlinedTextField(
-                            value = viewModel.textAnswers[question.id] ?: "",
-                            onValueChange = { viewModel.updateTextAnswer(question.id, it) },
-                            label = { Text("Your Answer") },
-                            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 100.dp)
-                        )
-                    }
+                // 1. Text Answer Input
+                OutlinedTextField(
+                    value = viewModel.textAnswers[question.id] ?: "",
+                    onValueChange = { viewModel.updateTextAnswer(question.id, it) },
+                    label = { Text("Type your answer here") },
+                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 100.dp)
+                )
 
-                    QuestionType.HANDWRITTEN_IMAGE -> {
-                        val capturedImageUri = viewModel.imageAnswers[question.id]
-                        if (capturedImageUri != null) {
-                            Image(
-                                painter = rememberAsyncImagePainter(capturedImageUri),
-                                contentDescription = "Captured Answer",
-                                modifier = Modifier.fillMaxWidth().height(200.dp),
-                                contentScale = ContentScale.Fit
-                            )
+                Text(
+                    "OR",
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                // 2. Image Answer Input
+                val capturedImageUri = viewModel.imageAnswers[question.id]
+                if (capturedImageUri != null) {
+                    Image(
+                        painter = rememberAsyncImagePainter(capturedImageUri),
+                        contentDescription = "Captured Answer",
+                        modifier = Modifier.fillMaxWidth().height(200.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Button(
+                    onClick = {
+                        if (cameraPermissionState.status.isGranted) {
+                            val uri = ComposeFileProvider.getImageUri(context)
+                            imageUri = uri
+                            cameraLauncher.launch(uri)
+                        } else {
+                            cameraPermissionState.launchPermissionRequest()
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                if (cameraPermissionState.status.isGranted) {
-                                    val uri = ComposeFileProvider.getImageUri(context)
-                                    imageUri = uri
-                                    cameraLauncher.launch(uri)
-                                } else {
-                                    cameraPermissionState.launchPermissionRequest()
-                                }
-                            },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text(if (capturedImageUri == null) "Capture Answer" else "Retake Picture")
-                        }
-                    }
+                    },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text(if (capturedImageUri == null) "Capture Answer" else "Retake Picture")
                 }
             }
+
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter)

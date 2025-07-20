@@ -70,10 +70,11 @@ object ImageUtils {
     suspend fun compressImage(
         context: Context,
         uri: Uri,
-        quality: Int = 85, // Default JPEG quality
-        reqWidth: Int = 1024, // Default target width
-        reqHeight: Int = 1024, // Default target height
-        format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG // Default output format
+        quality: Int = 90,
+        reqWidth: Int = 1024,
+        reqHeight: Int = 1024,
+        targetSizeKb: Int = 500,
+        format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG
     ): ImageCompressionResult {
         Log.d(TAG, "[ImageUtils] Starting compression for URI: $uri")
         return withContext(Dispatchers.IO) {
@@ -126,10 +127,19 @@ object ImageUtils {
 
                 Log.d(TAG, "[ImageUtils] Decoded bitmap with dimensions: ${bitmap.width}x${bitmap.height}")
                 val outputStream = ByteArrayOutputStream()
-                bitmap.compress(format, quality, outputStream)
+
+                var currentQuality = quality
+                bitmap.compress(format, currentQuality, outputStream)
+
+                while (outputStream.size() / 1024 > targetSizeKb && currentQuality > 50) {
+                    currentQuality -= 10
+                    outputStream.reset()
+                    bitmap.compress(format, currentQuality, outputStream)
+                    Log.d(TAG, "[ImageUtils] Retrying compression. New quality: $currentQuality, New size: ${outputStream.size() / 1024} KB")
+                }
                 val compressedBytes = outputStream.toByteArray()
                 val finalSizeKb = compressedBytes.size / 1024.0
-                Log.d(TAG, "[ImageUtils] Compression successful. Final size: ${DecimalFormat("#.##").format(finalSizeKb)} KB")
+                Log.d(TAG, "[ImageUtils] Compression successful. Final quality: $currentQuality, Final size: ${DecimalFormat("#.##").format(finalSizeKb)} KB")
 
                 ImageCompressionResult.Success(compressedBytes)
 
@@ -182,9 +192,7 @@ object ImageUtils {
             val halfHeight: Int = height / 2
             val halfWidth: Int = width / 2
 
-            // Calculate the largest inSampleSize value that is a power of 2 and keeps both
-            // height and width larger than or equal to the requested height and width.
-            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+            while ((halfHeight / inSampleSize) >= reqHeight || (halfWidth / inSampleSize) >= reqWidth) {
                 inSampleSize *= 2
             }
         }

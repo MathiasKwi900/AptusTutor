@@ -73,15 +73,13 @@ interface SessionDao {
 
     @Transaction
     @Query("""
-    SELECT S.*, C.*,
-           (EXISTS (SELECT 1 FROM assessment_submissions AS SUB WHERE SUB.sessionId = S.sessionId AND SUB.studentId = :studentId)) as hasSubmission
-    FROM sessions AS S
-    INNER JOIN class_profiles AS C ON S.classId = C.classId
+    SELECT S.* FROM sessions AS S
     INNER JOIN session_attendance AS SA ON S.sessionId = SA.sessionId
     WHERE SA.studentId = :studentId AND SA.status = 'Present'
     ORDER BY S.sessionTimestamp DESC
 """)
-    fun getSessionHistoryForStudent(studentId: String): Flow<List<SessionHistoryItem>>
+    fun getAttendedSessionsForStudent(studentId: String): Flow<List<SessionWithClassDetails>>
+
 }
 
 @Dao
@@ -115,4 +113,7 @@ interface AssessmentDao {
     LIMIT 1
 """)
     fun getSubmissionWithAssessment(sessionId: String, studentId: String): Flow<SubmissionWithAssessment?>
+
+    @Query("SELECT * FROM assessment_submissions WHERE studentId = :studentId")
+    fun getSubmissionsForStudent(studentId: String): Flow<List<AssessmentSubmission>>
 }

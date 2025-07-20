@@ -40,6 +40,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -383,10 +385,24 @@ fun LiveRosterTab(
 ) {
     LazyColumn(modifier = Modifier.padding(top = 8.dp)) {
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Pending Requests", style = MaterialTheme.typography.titleLarge)
-                if (uiState.connectionRequests.count { it.status == VerificationStatus.PIN_VERIFIED_PENDING_APPROVAL } > 1) {
-                    Button(onClick = onAcceptAll) { Text("Accept All") }
+            LazyRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                item {
+                    if (uiState.connectionRequests.count { it.status == VerificationStatus.PIN_VERIFIED_PENDING_APPROVAL } == 0) {
+                        Text(
+                            "Pending Requests: No Requests",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    } else {
+                        Text("Pending Requests", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+                item {
+                    Spacer(Modifier.width(8.dp))
+                }
+                item {
+                    if (uiState.connectionRequests.count { it.status == VerificationStatus.PIN_VERIFIED_PENDING_APPROVAL } > 1) {
+                        Button(onClick = onAcceptAll) { Text("Accept All") }
+                    }
                 }
             }
         }
@@ -394,7 +410,19 @@ fun LiveRosterTab(
             StudentRequestCard(request = request, onAccept = { onAccept(request) }, onReject = { onReject(request.endpointId) })
         }
 
-        item { Text("Connected Students (${uiState.connectedStudents.size})", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(vertical = 8.dp)) }
+        item {
+            if (uiState.connectedStudents.isEmpty()) {
+                Text("Connected Students (0)",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(vertical = 8.dp))
+            } else {
+                Text(
+                    "Connected Students (${uiState.connectedStudents.size})",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+        }
         items(uiState.connectedStudents) { student ->
             ConnectedStudentCard(student = student, onMarkAbsent = { onMarkAbsent(student.studentId) })
         }
@@ -459,10 +487,6 @@ fun CreateAssessmentDialog(
                                 val index = questions.indexOf(question)
                                 if (index != -1) questions[index] = question.copy(text = newText)
                             },
-                            onTypeChange = { newType ->
-                                val index = questions.indexOf(question)
-                                if (index != -1) questions[index] = question.copy(type = newType)
-                            },
                             onMarkingGuideChange = { newGuide ->
                                 val index = questions.indexOf(question)
                                 if (index != -1) questions[index] = question.copy(markingGuide = newGuide)
@@ -488,11 +512,13 @@ fun CreateAssessmentDialog(
             Button(
                 onClick = {
                     val processedQuestions = questions.map { question ->
-                        if (question.questionImagePath != null && question.type == QuestionType.TEXT_INPUT) {
-                            question.copy(type = QuestionType.HANDWRITTEN_IMAGE)
-                        } else {
-                            question
-                        }
+                        question.copy(
+                            type = if (question.questionImagePath != null) {
+                                QuestionType.HANDWRITTEN_IMAGE
+                            } else {
+                                QuestionType.TEXT_INPUT
+                            }
+                        )
                     }
                     val blueprint = AssessmentBlueprint(
                         sessionId = sessionId,
@@ -513,17 +539,15 @@ fun CreateAssessmentDialog(
     )
 }
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun QuestionEditor(
     question: AssessmentQuestion,
     onQuestionChange: (String) -> Unit,
-    onTypeChange: (QuestionType) -> Unit,
     onMarkingGuideChange: (String) -> Unit,
     onImageAttached: (String?) -> Unit,
     onDelete: () -> Unit
 ) {
-    var dropdownExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var tempImageUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -599,41 +623,12 @@ fun QuestionEditor(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Column {
-                Box {
-                    OutlinedTextField(
-                        value = question.type.name.replace("_", " "),
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Answer Type") },
-                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Dropdown") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = true, onClick = { dropdownExpanded = true })
-                    )
-                    DropdownMenu(
-                        expanded = dropdownExpanded,
-                        onDismissRequest = { dropdownExpanded = false },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        QuestionType.entries.forEach { type ->
-                            DropdownMenuItem(
-                                text = { Text(type.name.replace("_", " ")) },
-                                onClick = {
-                                    onTypeChange(type)
-                                    dropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = question.markingGuide,
-                    onValueChange = onMarkingGuideChange,
-                    label = { Text("Marking Guide / Correct Answer") },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                )
-            }
+            OutlinedTextField(
+                value = question.markingGuide,
+                onValueChange = onMarkingGuideChange,
+                label = { Text("Marking Guide / Correct Answer") },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            )
         }
     }
 }
@@ -646,17 +641,24 @@ fun ConnectedStudentCard(
     Card(modifier = Modifier
         .fillMaxWidth()
         .padding(vertical = 4.dp)) {
-        Row(
+        LazyRow(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(student.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            OutlinedButton(
-                onClick = onMarkAbsent,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-            ) {
-                Text("Mark Absent")
+            item {
+                Text(student.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            }
+            item {
+                Spacer(Modifier.width(8.dp))
+            }
+            item {
+                OutlinedButton(
+                    onClick = onMarkAbsent,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Mark Absent")
+                }
             }
         }
     }
@@ -728,17 +730,24 @@ fun CreateClassDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
 @Composable
 fun ClassCard(classWithStudents: ClassWithStudents, onStart: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(
+        LazyRow(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Text(classWithStudents.classProfile.className, fontWeight = FontWeight.Bold)
-                Text("${classWithStudents.students.size} students on roster")
+            item {
+                Column {
+                    Text(classWithStudents.classProfile.className, fontWeight = FontWeight.Bold)
+                    Text("${classWithStudents.students.size} students")
+                }
             }
-            Button(onClick = onStart) {
-                Text("Start Session")
+            item {
+                Spacer(Modifier.width(8.dp))
+            }
+            item {
+                Button(onClick = onStart) {
+                    Text("Start Session")
+                }
             }
         }
     }

@@ -10,7 +10,6 @@ import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.SessionHistoryItem
-import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -22,6 +21,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -48,8 +49,18 @@ class StudentDashboardViewModel @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val sessionHistory: StateFlow<List<SessionHistoryItem>> =
-        userPreferencesRepository.userIdFlow.flatMapLatest { studentId ->
-            repository.getSessionHistoryForStudent(studentId ?: "")
+        userPreferencesRepository.userIdFlow.filterNotNull().flatMapLatest { studentId ->
+            val attendedSessionsFlow = repository.getAttendedSessionsForStudent(studentId)
+            val submissionsFlow = repository.getSubmissionsForStudent(studentId)
+
+            combine(attendedSessionsFlow, submissionsFlow) { sessions, submissions ->
+                sessions.map { sessionWithDetails ->
+                    SessionHistoryItem(
+                        sessionWithDetails = sessionWithDetails,
+                        hasSubmission = submissions.any { it.sessionId == sessionWithDetails.session.sessionId }
+                    )
+                }
+            }
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -106,13 +117,16 @@ class StudentDashboardViewModel @Inject constructor(
             val studentName = userPreferencesRepository.userNameFlow.first() ?: "Student"
 
             val finalAnswers = assessment.questions.map { q ->
+                val textResponse = textAnswers[q.id]
+                val imageResponseProvided = imageAnswers.containsKey(q.id)
+                val finalTextResponse = if (isAutoSubmit && textResponse.isNullOrBlank() && !imageResponseProvided) {
+                    "[NO ANSWER - TIME UP]"
+                } else {
+                    textResponse
+                }
                 AssessmentAnswer(
                     questionId = q.id,
-                    textResponse = when {
-                        isAutoSubmit -> "[NO ANSWER - TIME UP]"
-                        q.type == QuestionType.TEXT_INPUT -> textAnswers[q.id] ?: ""
-                        else -> null
-                    }
+                    textResponse = finalTextResponse
                 )
             }
 
