@@ -22,7 +22,8 @@ import javax.inject.Inject
 data class SubmissionDetailsUiState(
     val submission: AssessmentSubmission? = null,
     val assessment: Assessment? = null,
-    val draftAnswers: Map<String, AssessmentAnswer> = emptyMap()
+    val draftAnswers: Map<String, AssessmentAnswer> = emptyMap(),
+    val savedQuestionIds: Set<String> = emptySet()
 )
 
 @HiltViewModel
@@ -64,7 +65,10 @@ class SubmissionDetailsViewModel @Inject constructor(
             newDrafts[questionId]?.let {
                 newDrafts[questionId] = it.copy(score = newScore.toIntOrNull())
             }
-            currentState.copy(draftAnswers = newDrafts)
+            currentState.copy(
+                draftAnswers = newDrafts,
+                savedQuestionIds = currentState.savedQuestionIds - questionId
+            )
         }
     }
 
@@ -74,21 +78,31 @@ class SubmissionDetailsViewModel @Inject constructor(
             newDrafts[questionId]?.let {
                 newDrafts[questionId] = it.copy(feedback = newFeedback)
             }
-            currentState.copy(draftAnswers = newDrafts)
+            currentState.copy(
+                draftAnswers = newDrafts,
+                savedQuestionIds = currentState.savedQuestionIds - questionId
+            )
         }
     }
 
     fun saveGrade(questionId: String) {
         viewModelScope.launch {
             val answerToSave = _uiState.value.draftAnswers[questionId]
-            if (answerToSave?.score != null && answerToSave.feedback?.isNotBlank() == true) {
+            // The score must not be null and the feedback must not be blank.
+            if (answerToSave?.score != null && answerToSave.feedback.orEmpty().isNotBlank()) {
                 repository.saveManualGrade(
                     submissionId = submissionId,
                     questionId = questionId,
-                    score = answerToSave.score!!,
-                    feedback = answerToSave.feedback!!
+                    score = answerToSave.score!!, // Safe due to check
+                    feedback = answerToSave.feedback!! // Safe due to check
                 )
                 _toastEvents.emit("Grade saved successfully")
+                _uiState.update {
+                    it.copy(savedQuestionIds = it.savedQuestionIds + questionId)
+                }
+            } else {
+                // Optional: Provide feedback to the user that they can't save yet.
+                _toastEvents.emit("Please provide a score and feedback before saving.")
             }
         }
     }

@@ -40,7 +40,6 @@ class AptusTutorRepository @Inject constructor(
     private val connectionsClient by lazy { Nearby.getConnectionsClient(context) }
     private val serviceId = "com.nexttechtitan.aptustutor.SERVICE_ID"
     private val repositoryScope = CoroutineScope(Dispatchers.IO)
-    private val pendingFileHeaders = mutableMapOf<Long, FileHeader>()
     private val pendingConnectionPayloads = mutableMapOf<String, ConnectionRequestPayload>()
     private val pendingAnswerFiles = mutableMapOf<String, File>()
     private val pendingQuestionFiles = mutableMapOf<String, MutableMap<String, File>>()
@@ -163,7 +162,6 @@ class AptusTutorRepository @Inject constructor(
 
             // 2. Create sanitized version for student
             val studentQuestions = assessmentBlueprint.questions.map {
-                Log.d("TutorSend", "Sending question '${it.text}' with type: ${it.type}")
                 StudentAssessmentQuestion(
                     id = it.id,
                     text = it.text,
@@ -179,7 +177,7 @@ class AptusTutorRepository @Inject constructor(
                 durationInMinutes = assessmentBlueprint.durationInMinutes
             )
 
-            // 3. Send the main assessment data
+            // 3. Send the main assessment data first
             _tutorUiState.update { it.copy(isAssessmentActive = true, activeAssessment = assessmentEntity) }
             val wrapper = PayloadWrapper(type = "START_ASSESSMENT", jsonData = gson.toJson(assessmentForStudent))
             val mainPayload = Payload.fromBytes(gson.toJson(wrapper).toByteArray(Charsets.UTF_8))
@@ -187,37 +185,47 @@ class AptusTutorRepository @Inject constructor(
             val studentEndpoints = _tutorUiState.value.connectedStudents.map { it.endpointId }
             if (studentEndpoints.isEmpty()) {
                 Log.w("AptusTutorDebug", "No connected students to send assessment to.")
-                return Result.success(Unit) // Not a failure, just no one to send to.
+                return Result.success(Unit)
             }
 
             studentEndpoints.forEach { connectionsClient.sendPayload(it, mainPayload).await() }
 
-            // 4. Send the compressed question image files
+            // 4. Send the compressed question image files using the atomic payload method
             for (question in assessmentBlueprint.questions) {
                 question.questionImagePath?.let { path ->
                     val imageFile = File(path)
                     if (imageFile.exists()) {
-                        // --- INTEGRATE IMAGE UTILS ---
-                        when(val compressionResult = ImageUtils.compressImage(context, Uri.fromFile(imageFile))) {
+                        // --- YOUR COMPRESSION LOGIC IS PRESERVED HERE ---
+                        when (val compressionResult = ImageUtils.compressImage(context, Uri.fromFile(imageFile))) {
                             is ImageUtils.ImageCompressionResult.Success -> {
-                                // 1. Save compressed bytes to a temporary file
-                                val tempFile = File.createTempFile("compressed_q_img_", ".jpg", context.cacheDir)
-                                tempFile.writeBytes(compressionResult.byteArray)
+                                // compressionResult.byteArray contains the compressed image data
+                                val compressedBytes = compressionResult.byteArray
 
-                                // 2. Create the payload from the new temporary file
-                                val fileHeader = FileHeader(
+                                // Create the new, more robust header
+                                val fileHeader = EmbeddedFileHeader(
                                     sessionId = assessmentBlueprint.sessionId,
                                     questionId = question.id
                                 )
-                                val headerWrapper = PayloadWrapper("QUESTION_FILE_HEADER", gson.toJson(fileHeader))
-                                val headerPayload = Payload.fromBytes(gson.toJson(headerWrapper).toByteArray(Charsets.UTF_8))
-                                val filePayload = Payload.fromFile(tempFile)
+                                val headerJson = gson.toJson(fileHeader)
+                                val headerBytes = headerJson.toByteArray(Charsets.UTF_8)
 
+                                // Create a temporary file to be our "smart package"
+                                val combinedFile = File.createTempFile("atomic_q_img_", ".bin", context.cacheDir)
+                                FileOutputStream(combinedFile).use { fos ->
+                                    // 1. Write header size (as a 4-byte Int)
+                                    fos.write(java.nio.ByteBuffer.allocate(4).putInt(headerBytes.size).array())
+                                    // 2. Write header JSON
+                                    fos.write(headerBytes)
+                                    // 3. Write THE COMPRESSED image bytes
+                                    fos.write(compressedBytes)
+                                }
+
+                                val filePayload = Payload.fromFile(combinedFile)
+                                Log.d("AptusTutorDebug", "[TUTOR] Sending atomic question image for qId: ${question.id}")
                                 for (endpointId in studentEndpoints) {
-                                    connectionsClient.sendPayload(endpointId, headerPayload).await()
                                     connectionsClient.sendPayload(endpointId, filePayload).await()
                                 }
-                                tempFile.delete()
+                                combinedFile.delete() // Clean up
                             }
                             is ImageUtils.ImageCompressionResult.Error -> {
                                 throw IOException("Failed to compress question image: ${compressionResult.message}")
@@ -226,7 +234,7 @@ class AptusTutorRepository @Inject constructor(
                     }
                 }
             }
-            Log.d("AptusTutorDebug", "Assessment sent successfully.")
+            Log.d("AptusTutorDebug", "Assessment and all files sent successfully.")
             Result.success(Unit)
 
         } catch (e: Exception) {
@@ -314,28 +322,41 @@ class AptusTutorRepository @Inject constructor(
         val metadataPayload = Payload.fromBytes(gson.toJson(metadataWrapper).toByteArray(Charsets.UTF_8))
         connectionsClient.sendPayload(tutorEndpointId, metadataPayload).await()
 
-        // 2. For each image, send a header, then the file
+        // 2. For each image, create a combined file and send it
         imageAnswers.forEach { (questionId, uri) ->
-            val fileHeader = FileHeader(
+            val fileHeader = EmbeddedFileHeader(
                 sessionId = submission.sessionId,
                 submissionId = submission.submissionId,
                 questionId = questionId
             )
-            val headerWrapper = PayloadWrapper("FILE_HEADER", gson.toJson(fileHeader))
-            val headerPayload = Payload.fromBytes(gson.toJson(headerWrapper).toByteArray(Charsets.UTF_8))
+            val headerJson = gson.toJson(fileHeader)
+            val headerBytes = headerJson.toByteArray(Charsets.UTF_8)
 
-            // This line waits for the header to be sent
-            connectionsClient.sendPayload(tutorEndpointId, headerPayload).await()
+            val combinedFile = File.createTempFile("submission_ans_img_", ".bin", context.cacheDir)
 
-            // Send file and WAIT for it to finish
-            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-            if (pfd != null) {
-                val filePayload = Payload.fromFile(pfd)
+            try {
+                FileOutputStream(combinedFile).use { fos ->
+                    // 1. Write header size
+                    fos.write(java.nio.ByteBuffer.allocate(4).putInt(headerBytes.size).array())
+                    // 2. Write header JSON
+                    fos.write(headerBytes)
+                    // 3. Write image bytes from the content URI
+                    context.contentResolver.openInputStream(uri)?.use { imageInputStream ->
+                        imageInputStream.copyTo(fos)
+                    } ?: throw IOException("Could not open input stream for URI: $uri")
+                }
+
+                val filePayload = Payload.fromFile(combinedFile)
+                Log.d("AptusTutorDebug", "[STUDENT] Sending answer image for qId: $questionId with size ${combinedFile.length()}")
                 connectionsClient.sendPayload(tutorEndpointId, filePayload).await()
+
+            } catch (e: Exception) {
+                Log.e("AptusTutorDebug", "[STUDENT] Failed to create or send combined file for qId: $questionId", e)
+            } finally {
+                combinedFile.delete() // Always clean up
             }
         }
     }
-
     // --- Shared Callbacks ---
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
@@ -556,8 +577,6 @@ class AptusTutorRepository @Inject constructor(
                         }
                     }
                 }
-                "FILE_HEADER" -> handleFileHeader(payload.id, gson.fromJson(wrapper.jsonData, FileHeader::class.java))
-                "QUESTION_FILE_HEADER" -> handleFileHeader(payload.id, gson.fromJson(wrapper.jsonData, FileHeader::class.java))
                 "CONNECTION_APPROVED" -> {
                     Log.d("AptusTutorDebug", "[STUDENT] Connection approved by tutor. Fully connected.")
                     _studentUiState.update { it.copy(connectionStatus = "Connected") }
@@ -577,43 +596,73 @@ class AptusTutorRepository @Inject constructor(
     }
 
     private suspend fun handleFilePayload(payload: Payload) = withContext(Dispatchers.IO) {
-        val fileHeader = pendingFileHeaders.remove(payload.id) ?: return@withContext
         val receivedFilePayload = payload.asFile() ?: return@withContext
+        val receivedUri = receivedFilePayload.asUri() ?: return@withContext
 
-        val tempCopiedFile = File.createTempFile("pending_${payload.id}_", ".jpg", context.cacheDir)
+        var header: EmbeddedFileHeader? = null
+        // FIX: Initialize as nullable to handle potential exceptions during parsing.
+        var finalImageFile: File? = null
+
         try {
-            context.contentResolver.openInputStream(receivedFilePayload.asUri()!!)?.use { inputStream ->
-                FileOutputStream(tempCopiedFile).use { outputStream ->
-                    inputStream.copyTo(outputStream)
+            context.contentResolver.openInputStream(receivedUri)?.use { inputStream ->
+                // 1. Read the header size (first 4 bytes)
+                val headerSizeBuffer = ByteArray(4)
+                if (inputStream.read(headerSizeBuffer) != 4) throw IOException("Could not read header size.")
+                val headerSize = java.nio.ByteBuffer.wrap(headerSizeBuffer).int
+
+                // 2. Read the header JSON
+                val headerBuffer = ByteArray(headerSize)
+                if (inputStream.read(headerBuffer) != headerSize) throw IOException("Could not read full header.")
+                val headerJson = String(headerBuffer, Charsets.UTF_8)
+                header = gson.fromJson(headerJson, EmbeddedFileHeader::class.java)
+
+                Log.d("AptusTutorDebug", "Parsed file header: $header")
+
+                // 3. Create a temporary file to hold the remaining pure image bytes
+                finalImageFile = File.createTempFile("final_img_", ".jpg", context.cacheDir)
+                FileOutputStream(finalImageFile).use { fileOutputStream ->
+                    inputStream.copyTo(fileOutputStream)
                 }
             }
-        } catch (e: IOException) {
-            Log.e("AptusTutorDebug", "Failed to copy incoming file payload to temp cache", e)
-            tempCopiedFile.delete()
+        } catch (e: Exception) {
+            Log.e("AptusTutorDebug", "Failed to parse incoming file payload", e)
+            finalImageFile?.delete() // Clean up partially created file if it exists
             return@withContext
         }
 
-        if (fileHeader.submissionId != null) {
-            val submission = assessmentDao.getSubmissionById(fileHeader.submissionId)
+        // Only proceed if the header and file were successfully processed
+        if (header == null || finalImageFile == null) {
+            Log.e("AptusTutorDebug", "Header or file was null after parsing, cannot process.")
+            finalImageFile?.delete()
+            return@withContext
+        }
+
+        // --- Logic to process the file based on the parsed header ---
+        if (header!!.submissionId != null) {
+            // This is an ANSWER image from a student, for the TUTOR
+            val submission = assessmentDao.getSubmissionById(header!!.submissionId!!)
             if (submission == null) {
-                val cacheKey = "${fileHeader.submissionId}_${fileHeader.questionId}"
-                pendingAnswerFiles[cacheKey] = tempCopiedFile
-                Log.d("AptusTutorDebug", "[TUTOR] Caching answer image at: ${tempCopiedFile.absolutePath}")
+                Log.d("AptusTutorDebug", "[TUTOR] Caching answer image: ${finalImageFile!!.name}")
+                val cacheKey = "${header!!.submissionId}_${header!!.questionId}"
+                pendingAnswerFiles[cacheKey] = finalImageFile!!
             } else {
-                processAnswerImage(submission, fileHeader.questionId, tempCopiedFile)
-                tempCopiedFile.delete()
+                Log.d("AptusTutorDebug", "[TUTOR] Processing answer image directly.")
+                processAnswerImage(submission, header!!.questionId, finalImageFile!!)
+                finalImageFile!!.delete()
             }
         } else {
+            // This is a QUESTION image from the tutor, for the STUDENT
             val activeAssessment = _studentUiState.value.activeAssessment
-            if (activeAssessment == null || activeAssessment.sessionId != fileHeader.sessionId) {
-                // Metadata not ready. Cache OUR COPY of the file.
-                Log.d("AptusTutorDebug", "[STUDENT] Caching question image at: ${tempCopiedFile.absolutePath}")
-                val sessionFiles = pendingQuestionFiles.getOrPut(fileHeader.sessionId) { mutableMapOf() }
-                sessionFiles[fileHeader.questionId] = tempCopiedFile
+            // ENHANCEMENT: Validate that the file belongs to the student's current session.
+            if (activeAssessment == null || activeAssessment.sessionId != header!!.sessionId) {
+                Log.w("AptusTutorDebug", "[STUDENT] Caching question image as active assessment is not ready or session ID mismatch.")
+                // FIX: Corrected variable name from 'fileHeader' to 'header'
+                val sessionFiles = pendingQuestionFiles.getOrPut(header!!.sessionId) { mutableMapOf() }
+                sessionFiles[header!!.questionId] = finalImageFile!!
             } else {
-                // Metadata is ready. Process OUR COPY now and delete the temp file.
-                processQuestionImage(fileHeader.questionId, tempCopiedFile)
-                tempCopiedFile.delete()
+                Log.d("AptusTutorDebug", "[STUDENT] Processing question image directly.")
+                processQuestionImage(header!!.questionId, finalImageFile!!)
+                finalImageFile!!.delete()
             }
         }
     }
@@ -701,10 +750,6 @@ class AptusTutorRepository @Inject constructor(
 
     fun getSubmissionsForStudent(studentId: String): Flow<List<AssessmentSubmission>> {
         return assessmentDao.getSubmissionsForStudent(studentId)
-    }
-
-    private fun handleFileHeader(payloadId: Long, fileHeader: FileHeader) {
-        pendingFileHeaders[payloadId] = fileHeader
     }
 
     fun clearActiveAssessmentForStudent() {
