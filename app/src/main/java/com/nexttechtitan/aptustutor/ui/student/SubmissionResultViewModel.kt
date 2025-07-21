@@ -30,7 +30,7 @@ class SubmissionResultViewModel @Inject constructor(
             repository.getSubmissionWithAssessment(sessionId, studentId)
         }
         .map { result ->
-            if (result != null) {
+            if (result?.submission != null && result.assessment != null) {
                 SubmissionResultUiState(isLoading = false, submissionWithAssessment = result)
             } else {
                 SubmissionResultUiState(isLoading = false, error = "Could not find submission results.")

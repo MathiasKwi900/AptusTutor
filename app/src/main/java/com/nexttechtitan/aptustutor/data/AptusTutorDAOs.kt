@@ -15,7 +15,7 @@ data class SubmissionWithAssessment(
         parentColumn = "assessmentId",
         entityColumn = "id"
     )
-    val assessment: Assessment
+    val assessment: Assessment?
 )
 
 @Dao
@@ -80,6 +80,9 @@ interface SessionDao {
 """)
     fun getAttendedSessionsForStudent(studentId: String): Flow<List<SessionWithClassDetails>>
 
+    @Transaction
+    @Query("SELECT * FROM sessions WHERE tutorId = :tutorId AND endTime IS NOT NULL ORDER BY sessionTimestamp DESC")
+    fun getTutorSessionHistory(tutorId: String): Flow<List<SessionWithClassDetails>>
 }
 
 @Dao
@@ -92,6 +95,9 @@ interface AssessmentDao {
 
     @Query("SELECT * FROM assessment_submissions WHERE assessmentId = :assessmentId")
     fun getSubmissionsForAssessment(assessmentId: String): Flow<List<AssessmentSubmission>>
+
+    @Query("SELECT * FROM assessment_submissions WHERE sessionId = :sessionId")
+    fun getSubmissionsForSession(sessionId: String): Flow<List<AssessmentSubmission>>
 
     @Query("SELECT * FROM assessment_submissions WHERE submissionId = :submissionId")
     suspend fun getSubmissionById(submissionId: String): AssessmentSubmission?
@@ -116,4 +122,7 @@ interface AssessmentDao {
 
     @Query("SELECT * FROM assessment_submissions WHERE studentId = :studentId")
     fun getSubmissionsForStudent(studentId: String): Flow<List<AssessmentSubmission>>
+
+    @Query("SELECT * FROM assessments WHERE id = :assessmentId")
+    fun getAssessmentById(assessmentId: String): Flow<Assessment?>
 }

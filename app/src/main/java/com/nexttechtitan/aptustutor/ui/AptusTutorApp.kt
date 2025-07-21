@@ -23,12 +23,14 @@ import com.nexttechtitan.aptustutor.ui.student.StudentDashboardViewModel
 import com.nexttechtitan.aptustutor.ui.student.SubmissionResultScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SubmissionDetailsScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorDashboardScreen
+import com.nexttechtitan.aptustutor.ui.tutor.TutorHistoryScreen
 
 // Simple enum for screen routes
 enum class AptusTutorScreen {
     Splash,
     RoleSelection,
     TutorDashboard,
+    TutorHistory,
     StudentDashboard,
     AssessmentScreen,
     SubmissionDetailsScreen,
@@ -73,7 +75,18 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
                 onNavigateToSubmission = { submissionId ->
                     navController.navigate("${AptusTutorScreen.SubmissionDetailsScreen.name}/$submissionId")
                 },
+                onNavigateToHistory = {
+                    navController.navigate(AptusTutorScreen.TutorHistory.name)
+                },
                 navController = navController
+            )
+        }
+        composable(AptusTutorScreen.TutorHistory.name) {
+            TutorHistoryScreen(
+                onNavigateToSubmission = { submissionId ->
+                    navController.navigate("${AptusTutorScreen.SubmissionDetailsScreen.name}/$submissionId")
+                },
+                onNavigateBack = { navController.popBackStack() }
             )
         }
         composable(
