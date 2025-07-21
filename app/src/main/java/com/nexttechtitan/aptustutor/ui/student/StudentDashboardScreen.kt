@@ -79,7 +79,7 @@ fun StudentDashboardScreen(
     viewModel: StudentDashboardViewModel = hiltViewModel(),
     navController: NavHostController
 ) {
-    // --- BATTLE-TESTED LOGIC BLOCK (PRESERVED EXACTLY) ---
+    Log.d("AptusTutorDebug", "==> BRACKET LOG: Recomposing StudentDashboardScreen.")
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.sessionHistory.collectAsStateWithLifecycle()
     var sessionToJoin by remember { mutableStateOf<DiscoveredSession?>(null) }
@@ -105,8 +105,7 @@ fun StudentDashboardScreen(
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT,
-                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.BLUETOOTH_CONNECT
             )
             else -> listOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -445,6 +444,9 @@ fun SessionCard(session: DiscoveredSession, uiState: StudentDashboardUiState, on
 fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: () -> Unit) {
     val formatter = remember { SimpleDateFormat("EEE, d MMM yyyy 'at' hh:mm a", Locale.getDefault()) }
     val sessionDetails = sessionHistoryItem.sessionWithDetails
+    if (sessionDetails.classProfile == null) {
+        Log.e("AptusTutorDebug", "ClassProfile is null for session: ${sessionDetails.session.sessionId}")
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -452,7 +454,7 @@ fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: ()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = sessionDetails.classProfile.className,
+                text = sessionDetails.classProfile?.className ?: "Class Name",
                 style = MaterialTheme.typography.titleMedium
             )
             Text(

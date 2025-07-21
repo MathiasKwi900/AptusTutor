@@ -1,18 +1,38 @@
 package com.nexttechtitan.aptustutor.ui.student
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +50,7 @@ fun SubmissionResultScreen(
     viewModel: SubmissionResultViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val submissionWithAssessment = uiState.submissionWithAssessment
 
     Scaffold(
         topBar = {
@@ -49,17 +70,36 @@ fun SubmissionResultScreen(
                     CircularProgressIndicator()
                 }
             }
-            uiState.submissionWithAssessment != null -> {
-                val assessment = uiState.submissionWithAssessment!!.assessment
-                val submission = uiState.submissionWithAssessment!!.submission
+            submissionWithAssessment?.assessment != null -> {
+                val assessment = submissionWithAssessment.assessment
+                val submission = submissionWithAssessment.submission
+                val totalScore = submission.answers?.sumOf { it.score ?: 0 } ?: 0
+                val maxScore = assessment.questions.sumOf { it.maxScore }
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    itemsIndexed(assessment.questions) { index, question ->
-                        val answer = submission.answers.find { it.questionId == question.id }
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text("Total Score", style = MaterialTheme.typography.titleMedium)
+                                Text("$totalScore / $maxScore", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
+                        val answer = submission.answers?.find { it.questionId == question.id }
                         ResultAnswerCard(
                             questionIndex = index + 1,
                             question = question,
@@ -86,19 +126,28 @@ fun ResultAnswerCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             // --- Question ---
-            Text("Question $questionIndex", style = MaterialTheme.typography.titleMedium)
-            Text(question.text, fontWeight = FontWeight.Bold)
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text("Question $questionIndex", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("${question.maxScore} marks", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(question.text)
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
             // --- Your Answer ---
             Text("Your Answer:", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            if (answer?.textResponse != null) {
-                Text(answer.textResponse)
-            } else if (answer?.imageFilePath != null) {
+            Spacer(Modifier.height(8.dp))
+
+            if (!answer?.textResponse.isNullOrBlank()) {
+                Text(answer!!.textResponse)
+            } else if (!answer?.imageFilePath.isNullOrBlank()) {
                 Image(
                     painter = rememberAsyncImagePainter(model = File(answer.imageFilePath!!)),
                     contentDescription = "Your handwritten answer",
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(MaterialTheme.shapes.medium),
                     contentScale = ContentScale.Fit
                 )
             } else {
@@ -110,12 +159,14 @@ fun ResultAnswerCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Tutor Feedback:", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(4.dp))
                     Text(answer?.feedback ?: "No feedback provided.")
                 }
+                Spacer(Modifier.width(16.dp))
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Score", style = MaterialTheme.typography.titleSmall)
                     Text(

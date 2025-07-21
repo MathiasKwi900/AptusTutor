@@ -8,25 +8,39 @@ import com.nexttechtitan.aptustutor.data.AssessmentBlueprint
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import com.nexttechtitan.aptustutor.data.ClassWithStudents
 import com.nexttechtitan.aptustutor.data.ConnectionRequest
+import com.nexttechtitan.aptustutor.data.FeedbackStatus
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import androidx.work.Data
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import com.nexttechtitan.aptustutor.ai.AIBatchGradingWorker
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class SubmissionWithStatus(
+    val submission: AssessmentSubmission,
+    val statusText: String,
+    val feedbackStatus: FeedbackStatus
+)
+
 @HiltViewModel
 class TutorDashboardViewModel @Inject constructor(
     private val repository: AptusTutorRepository,
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val workManager: WorkManager
 ) : ViewModel() {
 
     val uiState = repository.tutorUiState
@@ -36,8 +50,8 @@ class TutorDashboardViewModel @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val tutorClasses: StateFlow<List<ClassWithStudents>> =
-        userPreferencesRepository.userIdFlow.flatMapLatest { tutorId ->
-            repository.getClassesForTutor(tutorId ?: "")
+        userPreferencesRepository.userIdFlow.filterNotNull().flatMapLatest { tutorId ->
+            repository.getClassesForTutor(tutorId)
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -45,11 +59,23 @@ class TutorDashboardViewModel @Inject constructor(
         )
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val assessmentSubmissions: StateFlow<List<AssessmentSubmission>> =
+    val submissionsWithStatus: StateFlow<List<SubmissionWithStatus>> =
         uiState.flatMapLatest { state ->
             val assessmentId = state.activeAssessment?.id
             if (assessmentId != null) {
-                repository.getSubmissionsFlow(assessmentId)
+                // Combine the submissions flow with the assessment flow
+                combine(
+                    repository.getSubmissionsFlowForAssessment(assessmentId),
+                    repository.getAssessmentById(assessmentId).filterNotNull()
+                ) { submissions, assessment ->
+                    submissions.map { submission ->
+                        SubmissionWithStatus(
+                            submission = submission,
+                            statusText = calculateGradingStatus(submission, assessment),
+                            feedbackStatus = submission.feedbackStatus
+                        )
+                    }
+                }
             } else {
                 flowOf(emptyList())
             }
@@ -58,6 +84,57 @@ class TutorDashboardViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
+
+    val hasUngradedSubmissions: StateFlow<Boolean> =
+        submissionsWithStatus.map { submissions ->
+            submissions.any { it.statusText == "Not Graded" || it.statusText.startsWith("In Progress") }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    val hasPendingFeedback: StateFlow<Boolean> =
+        submissionsWithStatus.map { list ->
+            list.any {
+                it.submission.feedbackStatus == FeedbackStatus.SENT_PENDING_ACK
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    val hasSubmissionsToGrade: StateFlow<Boolean> =
+        submissionsWithStatus.map { list ->
+            list.any { it.feedbackStatus == FeedbackStatus.PENDING_SEND }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    fun sendAllPendingFeedback() {
+        val sessionId = uiState.value.activeSession?.sessionId ?: return
+        viewModelScope.launch {
+            repository.sendAllPendingFeedbackForSession(sessionId)
+        }
+    }
+
+    private fun calculateGradingStatus(submission: AssessmentSubmission, assessment: Assessment): String {
+        val totalQuestions = assessment.questions.size
+        val gradedQuestions = submission.answers?.count { it.score != null && it.feedback != null } ?: 0
+
+        return when {
+            gradedQuestions == 0 -> "Not Graded"
+            gradedQuestions < totalQuestions -> "In Progress ($gradedQuestions/$totalQuestions)"
+            else -> {
+                val score = submission.answers?.sumOf { it.score ?: 0 } ?: 0
+                val maxScore = assessment.questions.sumOf { it.maxScore }
+                "Graded: $score/$maxScore"
+            }
+        }
+    }
 
     fun createNewClass(className: String) {
         viewModelScope.launch {
@@ -139,6 +216,24 @@ class TutorDashboardViewModel @Inject constructor(
             val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
             repository.switchUserRole(newRole)
         }
+    }
+
+    fun startAiBatchGrading() {
+        val assessmentId = uiState.value.activeAssessment?.id ?: return
+        viewModelScope.launch { _toastEvents.emit("AI batch grading has been scheduled...") }
+
+        // Create the input data for the worker
+        val inputData = Data.Builder()
+            .putString(AIBatchGradingWorker.KEY_ASSESSMENT_ID, assessmentId)
+            .build()
+
+        // Build the request
+        val batchGradingRequest = OneTimeWorkRequestBuilder<AIBatchGradingWorker>()
+            .setInputData(inputData)
+            .build()
+
+        // Enqueue the work
+        workManager.enqueue(batchGradingRequest)
     }
 
     fun errorShown() {

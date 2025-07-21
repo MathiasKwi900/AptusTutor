@@ -1,57 +1,21 @@
 package com.nexttechtitan.aptustutor.ui.tutor
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.rounded.Lightbulb
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.BottomAppBar
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,7 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.rememberAsyncImagePainter
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
-import com.nexttechtitan.aptustutor.data.QuestionType
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -75,53 +39,73 @@ fun SubmissionDetailsScreen(
     viewModel: SubmissionDetailsViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit
 ) {
-    // --- BATTLE-TESTED LOGIC BLOCK (PRESERVED EXACTLY) ---
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val submission = uiState.submission
     val assessment = uiState.assessment
     val draftAnswers = uiState.draftAnswers
-    var showFeedbackSentDialog by remember { mutableStateOf(false) }
+    var showSendConfirmationDialog by rememberSaveable { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(key1 = Unit) {
+        viewModel.navigationEvents.collectLatest {
+            onNavigateBack()
+        }
+    }
+
     LaunchedEffect(key1 = true) {
-        viewModel.toastEvents.collect { message ->
+        viewModel.toastEvents.collectLatest { message ->
             scope.launch {
                 snackbarHostState.showSnackbar(message)
             }
         }
     }
 
-    val isGradingComplete = submission?.answers?.all { answer ->
-        answer.score != null && answer.feedback?.isNotBlank() == true
-    } ?: false
-    // --- END OF PRESERVED LOGIC BLOCK ---
+    val isGradingComplete = remember(draftAnswers) {
+        assessment?.questions?.all { q ->
+            val answer = draftAnswers[q.id]
+            answer?.score != null && !answer.feedback.isNullOrBlank()
+        } ?: false
+    }
+
+    val totalPossibleScore = remember(assessment) {
+        assessment?.questions?.sumOf { it.maxScore } ?: 0
+    }
+    val studentTotalScore = remember(draftAnswers) {
+        draftAnswers.values.sumOf { it.score ?: 0 }
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            // DESIGN: The action button is removed for a cleaner, navigation-focused TopAppBar.
-            CenterAlignedTopAppBar(
+            TopAppBar(
                 title = { Text(submission?.studentName ?: "Loading...", fontWeight = FontWeight.Bold) },
-                navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }
+                navigationIcon = { IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                actions = {
+                    if (assessment != null && submission != null) {
+                        Text(
+                            text = "Score: $studentTotalScore / $totalPossibleScore",
+                            modifier = Modifier.padding(end = 16.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             )
         },
-        // DESIGN: The primary screen action is now in a dedicated BottomAppBar, which is standard practice.
         bottomBar = {
             BottomAppBar(
                 contentPadding = PaddingValues(16.dp)
             ) {
                 Button(
-                    onClick = {
-                        viewModel.sendFeedback()
-                        showFeedbackSentDialog = true
-                    },
-                    enabled = isGradingComplete,
+                    onClick = { showSendConfirmationDialog = true },
+                    enabled = isGradingComplete && !uiState.feedbackSent,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Send Graded Feedback")
+                    Text(if (uiState.feedbackSent) "Feedback Sent" else "Send Graded Feedback")
                 }
             }
         }
@@ -145,11 +129,12 @@ fun SubmissionDetailsScreen(
             itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
                 val isSaved = uiState.savedQuestionIds.contains(question.id)
                 GradedAnswerCard(
-                    questionIndex = index,
+                    questionIndex = index + 1,
                     question = question,
                     answer = draftAnswers[question.id],
                     isSaved = isSaved,
-                    onScoreChange = { newScore -> viewModel.onScoreChange(question.id, newScore) },
+                    isFeedbackSent = uiState.feedbackSent,
+                    onScoreChange = { newScore -> viewModel.onScoreChange(question.id, newScore, question.maxScore) },
                     onFeedbackChange = { newFeedback -> viewModel.onFeedbackChange(question.id, newFeedback) },
                     onSaveGrade = { viewModel.saveGrade(question.id) }
                 )
@@ -157,9 +142,27 @@ fun SubmissionDetailsScreen(
         }
     }
 
-    if (showFeedbackSentDialog) {
-        FeedbackSentDialog(onDismiss = { showFeedbackSentDialog = false })
+    if (showSendConfirmationDialog) {
+        SendConfirmationDialog(
+            onDismiss = { showSendConfirmationDialog = false },
+            onConfirm = {
+                showSendConfirmationDialog = false
+                viewModel.sendFeedback()
+            }
+        )
     }
+}
+
+@Composable
+fun SendConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Warning, contentDescription = null) },
+        title = { Text("Send Feedback?") },
+        text = { Text("This action is final and cannot be undone. The student will be notified and the grading fields will become read-only.") },
+        confirmButton = { Button(onClick = onConfirm) { Text("Send") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -168,11 +171,14 @@ fun GradedAnswerCard(
     question: AssessmentQuestion,
     answer: AssessmentAnswer?,
     isSaved: Boolean,
+    isFeedbackSent: Boolean,
     onScoreChange: (String) -> Unit,
     onFeedbackChange: (String) -> Unit,
     onSaveGrade: () -> Unit
 ) {
-    val isSavable = answer?.score != null && answer.feedback.orEmpty().isNotBlank()
+    val isSavable = answer?.score != null && !answer.feedback.orEmpty().isNotBlank()
+    val isReadOnly = (isSaved || isFeedbackSent)
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -180,7 +186,7 @@ fun GradedAnswerCard(
         ) {
             // --- 1. Question & Guide Section ---
             Column {
-                Text("Question ${questionIndex + 1}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Question $questionIndex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 Text(question.text, style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.height(12.dp))
@@ -207,37 +213,32 @@ fun GradedAnswerCard(
                 Column(Modifier.padding(12.dp)) {
                     Text("Student's Answer", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    when (question.type) {
-                        QuestionType.TEXT_INPUT -> {
-                            Text(answer?.textResponse?.ifBlank { "No answer provided." } ?: "No answer provided.")
+                    val hasImage = !answer?.imageFilePath.isNullOrBlank()
+                    val hasText = !answer?.textResponse.isNullOrBlank()
+
+                    if (hasImage) {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = File(answer!!.imageFilePath!!)),
+                            contentDescription = "Handwritten Answer",
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                    if (hasText) {
+                        if (hasImage) {
+                            Spacer(Modifier.height(8.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(8.dp))
                         }
-                        QuestionType.HANDWRITTEN_IMAGE -> {
-                            if (answer?.imageFilePath != null) {
-                                Image(
-                                    painter = rememberAsyncImagePainter(model = File(answer.imageFilePath!!)),
-                                    contentDescription = "Handwritten Answer",
-                                    modifier = Modifier.fillMaxWidth().height(250.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(250.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        CircularProgressIndicator()
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            "Waiting for image...",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        Text(answer!!.textResponse!!)
+                    }
+                    if (!hasImage && !hasText) {
+                        Text(
+                            "[No answer provided]",
+                            fontStyle = FontStyle.Italic,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        )
                     }
                 }
             }
@@ -247,60 +248,55 @@ fun GradedAnswerCard(
                 Text("Grading Panel", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(IntrinsicSize.Min),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
                 ) {
                     OutlinedTextField(
                         value = answer?.score?.toString() ?: "",
                         onValueChange = onScoreChange,
                         label = { Text("Score") },
+                        suffix = { Text("/ ${question.maxScore}") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.width(100.dp)
+                        readOnly = isReadOnly,
+                        modifier = Modifier.width(120.dp)
                     )
-                    // This weighted spacer pushes the score field and save button to opposite ends.
-                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedTextField(
+                        value = answer?.feedback ?: "",
+                        onValueChange = onFeedbackChange,
+                        label = { Text("Feedback / Correction") },
+                        readOnly = isReadOnly,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 100.dp)
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // AI Button - Future functionality
+                    FilledTonalButton(
+                        onClick = { /* TODO: Wire to Gemma 3n */ },
+                        enabled = !isFeedbackSent,
+                    ) {
+                        Icon(Icons.Rounded.Lightbulb, contentDescription = null)
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Grade with AI")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    // The main Save button for the question
                     Button(
                         onClick = onSaveGrade,
-                        enabled = isSavable && !isSaved,
-                        modifier = Modifier.fillMaxHeight()
+                        enabled = isSavable && !isSaved && !isFeedbackSent
                     ) {
                         Text(if (isSaved) "Saved" else "Save")
                     }
                 }
-
-                OutlinedTextField(
-                    value = answer?.feedback ?: "",
-                    onValueChange = onFeedbackChange,
-                    label = { Text("Feedback / Correction") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .defaultMinSize(minHeight = 100.dp)
-                )
-                Spacer(Modifier.height(12.dp))
-                FilledTonalButton(
-                    onClick = { /* TODO: Wire up to Gemma 3n AI grading logic */ },
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Icon(Icons.Rounded.Lightbulb, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Grade with AI")
-                }
             }
         }
     }
-}
-
-@Composable
-fun FeedbackSentDialog(onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.CheckCircle, contentDescription = "Success")},
-        title = { Text("Feedback Sent") },
-        text = { Text("The graded assessment has been sent back to the student.") },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } }
-    )
 }

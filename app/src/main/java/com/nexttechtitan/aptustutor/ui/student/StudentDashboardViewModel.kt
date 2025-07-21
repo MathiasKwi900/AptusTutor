@@ -1,6 +1,7 @@
 package com.nexttechtitan.aptustutor.ui.student
 
 import android.net.Uri
+import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,6 +10,7 @@ import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
 import com.nexttechtitan.aptustutor.data.QuestionType
+import com.nexttechtitan.aptustutor.data.RepositoryEvent
 import com.nexttechtitan.aptustutor.data.SessionHistoryItem
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +29,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @HiltViewModel
@@ -46,26 +49,42 @@ class StudentDashboardViewModel @Inject constructor(
 
     val textAnswers = mutableStateMapOf<String, String>()
     val imageAnswers = mutableStateMapOf<String, Uri>()
+    private var currentSubmissionId: String? = null
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val sessionHistory: StateFlow<List<SessionHistoryItem>> =
-        userPreferencesRepository.userIdFlow.filterNotNull().flatMapLatest { studentId ->
-            val attendedSessionsFlow = repository.getAttendedSessionsForStudent(studentId)
-            val submissionsFlow = repository.getSubmissionsForStudent(studentId)
+    private val _sessionHistory = MutableStateFlow<List<SessionHistoryItem>>(emptyList())
+    val sessionHistory = _sessionHistory.asStateFlow()
 
-            combine(attendedSessionsFlow, submissionsFlow) { sessions, submissions ->
-                sessions.map { sessionWithDetails ->
-                    SessionHistoryItem(
-                        sessionWithDetails = sessionWithDetails,
-                        hasSubmission = submissions.any { it.sessionId == sessionWithDetails.session.sessionId }
-                    )
+    init {
+        viewModelScope.launch {
+            repository.events.collect { event ->
+                when (event) {
+                    is RepositoryEvent.NewFeedbackReceived -> {
+                        _events.emit("New graded feedback received!")
+                        refreshHistory()
+                    }
                 }
             }
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+        }
+        refreshHistory()
+    }
+
+    fun refreshHistory() {
+        viewModelScope.launch {
+            val studentId = userPreferencesRepository.userIdFlow.first() ?: return@launch
+
+            // Perform a stable, one-time read of sessions and submissions
+            val attendedSessions = repository.getAttendedSessionsForStudent(studentId).first()
+            val submissions = repository.getSubmissionsForStudent(studentId).first()
+
+            val historyItems = attendedSessions.map { sessionWithDetails ->
+                SessionHistoryItem(
+                    sessionWithDetails = sessionWithDetails,
+                    hasSubmission = submissions.any { it.sessionId == sessionWithDetails.session.sessionId }
+                )
+            }
+            _sessionHistory.value = historyItems
+        }
+    }
 
     fun startDiscovery() {
         viewModelScope.launch {
@@ -89,6 +108,7 @@ class StudentDashboardViewModel @Inject constructor(
         timerJob?.cancel()
         textAnswers.clear()
         imageAnswers.clear()
+        currentSubmissionId = null
         _timeLeft.value = durationInMinutes * 60
         timerJob = viewModelScope.launch {
             while (_timeLeft.value > 0) {
@@ -118,21 +138,23 @@ class StudentDashboardViewModel @Inject constructor(
 
             val finalAnswers = assessment.questions.map { q ->
                 val textResponse = textAnswers[q.id]
-                val imageResponseProvided = imageAnswers.containsKey(q.id)
-                val finalTextResponse = if (isAutoSubmit && textResponse.isNullOrBlank() && !imageResponseProvided) {
+                val imageUri = imageAnswers[q.id]
+                val finalTextResponse = if (isAutoSubmit && textResponse.isNullOrBlank() && imageUri == null) {
                     "[NO ANSWER - TIME UP]"
                 } else {
                     textResponse
                 }
                 AssessmentAnswer(
                     questionId = q.id,
-                    textResponse = finalTextResponse
+                    textResponse = finalTextResponse,
+                    imageFilePath = imageUri?.path
                 )
             }
 
             val submission = AssessmentSubmission(
                 sessionId = assessment.sessionId,
                 studentId = studentId,
+                submissionId = getSubmissionId(),
                 studentName = studentName,
                 assessmentId = assessment.id,
                 answers = finalAnswers
@@ -141,7 +163,15 @@ class StudentDashboardViewModel @Inject constructor(
             repository.submitAssessment(submission, imageAnswers)
             _events.emit("Assessment submitted successfully!")
             repository.clearActiveAssessmentForStudent()
+            currentSubmissionId = null
         }
+    }
+
+    fun getSubmissionId(): String {
+        if (currentSubmissionId == null) {
+            currentSubmissionId = UUID.randomUUID().toString()
+        }
+        return currentSubmissionId!!
     }
 
     fun switchUserRole() {

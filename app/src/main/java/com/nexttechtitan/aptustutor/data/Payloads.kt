@@ -10,7 +10,8 @@ data class StudentAssessmentQuestion(
     val id: String,
     val text: String,
     val type: QuestionType,
-    val questionImageFile: String? = null
+    val questionImageFile: String? = null,
+    val maxScore: Int
 )
 
 data class AssessmentBlueprint(
@@ -46,4 +47,15 @@ data class SessionEndPayload(
     val session: Session,
     val classProfile: ClassProfile,
     val attendance: SessionAttendance
+)
+
+data class GradedFeedbackPayload(
+    val submission: AssessmentSubmission,
+    val attendanceRecord: SessionAttendance,
+    val session: Session,
+    val classProfile: ClassProfile
+)
+
+data class FeedbackAckPayload( // "Ack" is short for "Acknowledgement"
+    val submissionId: String
 )

@@ -20,21 +20,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.CameraAlt
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.Group
-import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.rounded.FactCheck
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.rounded.FactCheck
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -54,9 +53,7 @@ import com.google.accompanist.permissions.rememberPermissionState
 import com.nexttechtitan.aptustutor.data.*
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import com.nexttechtitan.aptustutor.ui.student.ComposeFileProvider
-import com.nexttechtitan.aptustutor.ui.student.EmptyState
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 
@@ -65,16 +62,19 @@ import java.io.FileOutputStream
 fun TutorDashboardScreen(
     viewModel: TutorDashboardViewModel = hiltViewModel(),
     onNavigateToSubmission: (String) -> Unit,
+    onNavigateToHistory: () -> Unit,
     navController: NavHostController
 ) {
-    // --- BATTLE-TESTED LOGIC BLOCK (PRESERVED EXACTLY) ---
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val classes by viewModel.tutorClasses.collectAsStateWithLifecycle(initialValue = emptyList())
-    val submissions by viewModel.assessmentSubmissions.collectAsStateWithLifecycle()
+    val hasUngradedWork by viewModel.hasUngradedSubmissions.collectAsStateWithLifecycle()
+    val submissions by viewModel.submissionsWithStatus.collectAsStateWithLifecycle()
+    val hasPendingFeedback by viewModel.hasPendingFeedback.collectAsStateWithLifecycle()
+    val hasSubmissionsToGrade by viewModel.hasSubmissionsToGrade.collectAsStateWithLifecycle()
 
-    var showCreateClassDialog by remember { mutableStateOf(false) }
-    var showStopSessionDialog by remember { mutableStateOf(false) }
-    var showCreateAssessmentDialog by remember { mutableStateOf(false) }
+    var showCreateClassDialog by rememberSaveable { mutableStateOf(false) }
+    var showStopSessionDialog by rememberSaveable { mutableStateOf(false) }
+    var showCreateAssessmentDialog by rememberSaveable { mutableStateOf(false) }
     var selectedClassToStart by remember { mutableStateOf<ClassWithStudents?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -102,7 +102,7 @@ fun TutorDashboardScreen(
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
                 Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.BLUETOOTH_CONNECT
             )
             else -> listOf(
                 Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -117,25 +117,28 @@ fun TutorDashboardScreen(
             permissionState.launchMultiplePermissionRequest()
         }
     }
-    // --- END OF PRESERVED LOGIC BLOCK ---
 
     val isSessionActive = uiState.isAdvertising && uiState.activeClass != null
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            // DESIGN: The TopAppBar is now conditional, providing a cleaner look for the active session.
             AnimatedVisibility(visible = !isSessionActive) {
                 CenterAlignedTopAppBar(
                     title = { Text("Tutor Dashboard") },
-                    actions = { SettingsMenu(onSwitchRole = viewModel::switchUserRole, navController = navController) },
+                    // NEW: Actions menu now includes a link to the session history.
+                    actions = {
+                        IconButton(onClick = onNavigateToHistory) {
+                            Icon(Icons.Rounded.History, contentDescription = "Session History")
+                        }
+                        SettingsMenu(onSwitchRole = viewModel::switchUserRole, navController = navController)
+                    },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer
                     )
                 )
             }
         },
-        // DESIGN: A FloatingActionButton is the standard, intuitive way to handle a primary "create" action.
         floatingActionButton = {
             AnimatedVisibility(visible = !isSessionActive) {
                 FloatingActionButton(onClick = { showCreateClassDialog = true }) {
@@ -155,7 +158,10 @@ fun TutorDashboardScreen(
                     onAcceptAllRequests = { viewModel.acceptAll() },
                     onMarkAbsent = { studentId -> viewModel.markStudentAbsent(studentId) },
                     onCreateAssessment = { showCreateAssessmentDialog = true },
-                    onNavigateToSubmission = onNavigateToSubmission
+                    onNavigateToSubmission = onNavigateToSubmission,
+                    hasPendingFeedback = hasPendingFeedback,
+                    hasSubmissionsToGrade = hasSubmissionsToGrade,
+                    onSendAllPending = { viewModel.sendAllPendingFeedback() }
                 )
             } else {
                 ClassManagementScreen(
@@ -166,9 +172,9 @@ fun TutorDashboardScreen(
         }
     }
 
-    // --- DIALOGS (Wired to original logic, with improved UI) ---
     if (showStopSessionDialog) {
         StopSessionDialog(
+            hasUngradedWork = hasUngradedWork,
             onDismiss = { showStopSessionDialog = false },
             onTakeAttendanceAndStop = {
                 viewModel.takeAttendanceAndStop()
@@ -207,15 +213,17 @@ fun TutorDashboardScreen(
             className = classToStart.classProfile.className,
             onDismiss = { selectedClassToStart = null },
             onConfirm = {
-                viewModel.startSession(classToStart.classProfile.classId)
-                selectedClassToStart = null
+                if (permissionState.allPermissionsGranted) {
+                    viewModel.startSession(classToStart.classProfile.classId)
+                    selectedClassToStart = null
+                } else {
+                    permissionState.launchMultiplePermissionRequest()
+                }
             }
         )
     }
 }
 
-
-// --- SCREEN STATES ---
 
 @Composable
 fun ClassManagementScreen(
@@ -224,9 +232,9 @@ fun ClassManagementScreen(
 ) {
     if (classes.isEmpty()) {
         EmptyState(
-            icon = Icons.Rounded.Group,
+            icon = Icons.Rounded.School,
             headline = "No Classes Yet",
-            subline = "Tap the '+' button to create your first class and add students."
+            subline = "Tap the '+' button to create your first class. Once created, you can start a session to allow students to join and build your roster."
         )
     } else {
         LazyColumn(
@@ -251,24 +259,27 @@ fun ClassManagementScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActiveSessionScreen(
     uiState: TutorDashboardUiState,
-    submissions: List<AssessmentSubmission>,
+    submissions: List<SubmissionWithStatus>,
     onStopSession: () -> Unit,
     onAcceptRequest: (ConnectionRequest) -> Unit,
     onRejectRequest: (String) -> Unit,
     onAcceptAllRequests: () -> Unit,
     onMarkAbsent: (String) -> Unit,
     onCreateAssessment: () -> Unit,
-    onNavigateToSubmission: (String) -> Unit
+    onNavigateToSubmission: (String) -> Unit,
+    hasPendingFeedback: Boolean,
+    hasSubmissionsToGrade: Boolean,
+    onSendAllPending: () -> Unit
 ) {
-    var selectedTabIndex by remember { mutableStateOf(0) }
+    var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
     val tabs = listOf("Live Roster", "Assessment")
     val submissionCount = submissions.size
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        // DESIGN: A visually distinct header for all critical session info.
         item {
             SessionStatusHeader(
                 uiState = uiState,
@@ -277,32 +288,22 @@ fun ActiveSessionScreen(
             )
         }
 
-        // DESIGN: A modern, styled TabRow.
         item {
             TabRow(
                 selectedTabIndex = selectedTabIndex,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
                         text = {
-                            if (index == 1) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(title)
-                                    Spacer(Modifier.width(8.dp))
-                                    Badge(
-                                        containerColor = if (selectedTabIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-                                    ) {
-                                        Text(
-                                            "$submissionCount",
-                                            modifier = Modifier.padding(horizontal = 4.dp),
-                                            color = if (selectedTabIndex == index) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondary
-                                        )
-                                    }
+                            if (index == 1 && uiState.isAssessmentActive) { // Show badge only for assessment tab when active
+                                BadgedBox(badge = {
+                                    Badge { Text("$submissionCount") }
+                                }) {
+                                    Text(title, modifier = Modifier.padding(bottom = 8.dp))
                                 }
-
                             } else {
                                 Text(title)
                             }
@@ -312,15 +313,19 @@ fun ActiveSessionScreen(
             }
         }
 
-        // --- Tab Content ---
         when (selectedTabIndex) {
             0 -> liveRosterTabContent(uiState, onAcceptRequest, onRejectRequest, onAcceptAllRequests, onMarkAbsent)
-            1 -> assessmentTabContent(uiState, submissions, onNavigateToSubmission)
+            1 -> assessmentTabContent(
+                uiState,
+                submissions,
+                onNavigateToSubmission,
+                hasPendingFeedback = hasPendingFeedback,
+                hasSubmissionsToGrade = hasSubmissionsToGrade,
+                onSendAll = onSendAllPending,
+            )
         }
     }
 }
-
-// --- REDESIGNED COMPONENT HIERARCHY ---
 
 @Composable
 fun SessionStatusHeader(
@@ -361,7 +366,7 @@ fun SessionStatusHeader(
                 enabled = !uiState.isAssessmentActive,
                 modifier = Modifier.weight(1f)
             ) {
-                Text("New Assessment")
+                Text(if (uiState.isAssessmentActive) "Assessment Sent" else "New Assessment")
             }
             Button(
                 onClick = onStopSession,
@@ -388,16 +393,12 @@ fun ClassCard(classWithStudents: ClassWithStudents, onStart: () -> Unit) {
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
-            // Card Header: The most important info.
             Text(
                 text = classWithStudents.classProfile.className,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
-
             Spacer(Modifier.height(8.dp))
-
-            // Card Body: Secondary info with a helpful icon.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Rounded.Group,
@@ -412,13 +413,8 @@ fun ClassCard(classWithStudents: ClassWithStudents, onStart: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            // This weighted spacer is a powerful trick. It pushes everything
-            // below it to the bottom of the Column.
             Spacer(Modifier.weight(1f))
             Spacer(Modifier.height(16.dp))
-
-            // Card Action: Neatly aligned to the end (right side).
             Button(
                 onClick = onStart,
                 modifier = Modifier.align(Alignment.End)
@@ -464,7 +460,7 @@ fun ConnectedStudentCard(student: ConnectedStudent, onMarkAbsent: () -> Unit) {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Rounded.Check, contentDescription = "Connected", tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Rounded.CheckCircle, contentDescription = "Connected", tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(16.dp))
             Text(student.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
@@ -478,11 +474,9 @@ fun ConnectedStudentCard(student: ConnectedStudent, onMarkAbsent: () -> Unit) {
     }
 }
 
-// --- DIALOGS (Redesigned) ---
-
 @Composable
 fun CreateClassDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var className by remember { mutableStateOf("") }
+    var className by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Create New Class") },
@@ -508,8 +502,9 @@ fun CreateClassDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
 fun StartSessionDialog(className: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Start Session") },
-        text = { Text("Are you sure you want to start a session for '$className'?") },
+        icon = { Icon(Icons.Rounded.Podcasts, contentDescription = null) },
+        title = { Text("Start Session for '$className'?") },
+        text = { Text("Students will be able to discover and join this session using a 4-digit PIN.") },
         confirmButton = { Button(onClick = onConfirm) { Text("Start") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
@@ -517,34 +512,38 @@ fun StartSessionDialog(className: String, onDismiss: () -> Unit, onConfirm: () -
 
 @Composable
 fun StopSessionDialog(
+    hasUngradedWork: Boolean,
     onDismiss: () -> Unit,
     onTakeAttendanceAndStop: () -> Unit,
     onStopAnyway: () -> Unit
 ) {
+    val text = if (hasUngradedWork) {
+        "This session has ungraded submissions. You can end the session now and grade them later from your Session History. Are you sure you want to stop?"
+    } else {
+        "This will disconnect all students and finalize the attendance record. Are you sure?"
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Warning, contentDescription = null) },
         title = { Text("End Session?") },
-        text = { Text("This will disconnect all students and finalize the attendance record. Are you sure?") },
+        text = { Text(text) },
         confirmButton = {
-            Column(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            Button(
+                onClick = onTakeAttendanceAndStop,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Button(
-                    onClick = onTakeAttendanceAndStop,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Take Attendance & Stop")
-                }
+                Text("Finalize Attendance & Stop")
+            }
+        },
+        dismissButton = {
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
                     onClick = onStopAnyway,
-                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Stop Without Attendance")
                 }
                 TextButton(
                     onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Cancel")
                 }
@@ -559,9 +558,16 @@ fun CreateAssessmentDialog(
     onDismiss: () -> Unit,
     onSend: (AssessmentBlueprint) -> Unit
 ) {
-    var title by remember { mutableStateOf("") }
-    var duration by remember { mutableStateOf("10") }
+    var title by rememberSaveable { mutableStateOf("") }
+    var duration by rememberSaveable { mutableStateOf("10") }
     val questions = remember { mutableStateListOf<AssessmentQuestion>() }
+
+    // Add a default first question
+    LaunchedEffect(Unit) {
+        if (questions.isEmpty()) {
+            questions.add(AssessmentQuestion(text = "", type = QuestionType.TEXT_INPUT, markingGuide = "", maxScore = 10))
+        }
+    }
 
     AlertDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -571,7 +577,7 @@ fun CreateAssessmentDialog(
         onDismissRequest = onDismiss,
         title = { Text("Create New Assessment") },
         text = {
-            Column {
+            Column(modifier = Modifier.fillMaxSize()) {
                 OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Assessment Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(value = duration, onValueChange = { duration = it.filter { c -> c.isDigit() } }, label = { Text("Duration (minutes)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -583,18 +589,23 @@ fun CreateAssessmentDialog(
                         QuestionEditor(
                             questionNumber = index + 1,
                             question = question,
-                            onQuestionChange = { newText -> questions[questions.indexOf(question)] = question.copy(text = newText) },
-                            onMarkingGuideChange = { newGuide -> questions[questions.indexOf(question)] = question.copy(markingGuide = newGuide) },
-                            onImageAttached = { newPath -> questions[questions.indexOf(question)] = question.copy(questionImagePath = newPath) },
+                            onQuestionChange = { questions[index] = question.copy(text = it) },
+                            onMarkingGuideChange = { questions[index] = question.copy(markingGuide = it) },
+                            onMaxScoreChange = { newScore -> questions[index] = question.copy(maxScore = newScore) },
+                            onImageAttached = { newPath -> questions[index] = question.copy(questionImagePath = newPath) },
                             onDelete = { questions.remove(question) }
                         )
                     }
                     item {
-                        val buttonText = if (questions.isEmpty()) "Add Question" else "Add Another Question"
-                        Button(onClick = { questions.add(AssessmentQuestion(text = "", type = QuestionType.TEXT_INPUT, markingGuide = "")) }, modifier = Modifier.padding(top = 8.dp)) {
-                            Icon(Icons.Rounded.Add, contentDescription = null)
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text(buttonText)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
+                            Button(onClick = { questions.add(AssessmentQuestion(text = "", type = QuestionType.TEXT_INPUT, markingGuide = "", maxScore = 10)) }) {
+                                Icon(Icons.Rounded.Add, contentDescription = null)
+                                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                                Text("Add Another Question")
+                            }
                         }
                     }
                 }
@@ -614,7 +625,7 @@ fun CreateAssessmentDialog(
                     )
                     onSend(blueprint)
                 },
-                enabled = title.isNotBlank() && duration.isNotBlank() && questions.isNotEmpty() && questions.all { it.text.isNotBlank() }
+                enabled = title.isNotBlank() && duration.isNotBlank() && questions.isNotEmpty() && questions.all { it.text.isNotBlank() && it.markingGuide.isNotBlank() }
             ) { Text("Send to Class") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
@@ -628,6 +639,7 @@ fun QuestionEditor(
     question: AssessmentQuestion,
     onQuestionChange: (String) -> Unit,
     onMarkingGuideChange: (String) -> Unit,
+    onMaxScoreChange: (Int) -> Unit,
     onImageAttached: (String?) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -653,8 +665,8 @@ fun QuestionEditor(
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Question #$questionNumber", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete Question", tint = MaterialTheme.colorScheme.error)
+                IconButton(onClick = onDelete, enabled = questionNumber > 1) {
+                    Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete Question", tint = if (questionNumber > 1) MaterialTheme.colorScheme.error else Color.Gray)
                 }
             }
             OutlinedTextField(value = question.text, onValueChange = onQuestionChange, label = { Text("Question Text") }, modifier = Modifier.fillMaxWidth())
@@ -696,11 +708,17 @@ fun QuestionEditor(
                 }
             }
             OutlinedTextField(value = question.markingGuide, onValueChange = onMarkingGuideChange, label = { Text("Marking Guide / Correct Answer") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = question.maxScore.toString(),
+                onValueChange = { onMaxScoreChange(it.toIntOrNull() ?: 0) },
+                label = { Text("Max Score") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.align(Alignment.End)
+            )
         }
     }
 }
 
-// --- TAB CONTENT HELPERS (for LazyColumn) ---
 fun LazyListScope.liveRosterTabContent(
     uiState: TutorDashboardUiState,
     onAcceptRequest: (ConnectionRequest) -> Unit,
@@ -721,7 +739,7 @@ fun LazyListScope.liveRosterTabContent(
     }
     if (uiState.connectionRequests.isEmpty()) {
         item {
-            Text("No pending requests.", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("No pending requests.", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         }
     } else {
         items(uiState.connectionRequests, key = { it.endpointId }) { request ->
@@ -741,7 +759,7 @@ fun LazyListScope.liveRosterTabContent(
     }
     if (uiState.connectedStudents.isEmpty()){
         item {
-            Text("No students connected yet.", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("No students connected yet.", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         }
     } else {
         items(uiState.connectedStudents, key = { it.endpointId }) { student ->
@@ -755,13 +773,16 @@ fun LazyListScope.liveRosterTabContent(
 
 fun LazyListScope.assessmentTabContent(
     uiState: TutorDashboardUiState,
-    submissions: List<AssessmentSubmission>,
-    onSubmissionClicked: (String) -> Unit
+    submissions: List<SubmissionWithStatus>,
+    onSubmissionClicked: (String) -> Unit,
+    hasPendingFeedback: Boolean,
+    hasSubmissionsToGrade: Boolean,
+    onSendAll: () -> Unit
 ) {
     if (!uiState.isAssessmentActive || uiState.activeAssessment == null) {
         item {
             EmptyState(
-                icon = Icons.Rounded.Add,
+                icon = Icons.AutoMirrored.Rounded.FactCheck,
                 headline = "No Active Assessment",
                 subline = "Create a new assessment from the main controls above to send it to the class."
             )
@@ -776,25 +797,58 @@ fun LazyListScope.assessmentTabContent(
         }
         if (submissions.isEmpty()) {
             item {
-                Text("Waiting for students to submit their answers...", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Waiting for students to submit their answers...", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
             }
         } else {
-            items(submissions, key = { it.submissionId }) { submission ->
+            items(submissions, key = { it.submission.submissionId }) { item ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .clickable { onSubmissionClicked(submission.submissionId) }
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clickable { onSubmissionClicked(item.submission.submissionId) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
                 ) {
-                    Text(submission.studentName, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(item.submission.studentName, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        Text(item.statusText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item {
+                if (submissions.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                    ) {
+                        // This is the new button
+                        Button(
+                            onClick = { /* Will Grade using Gemma 3n */ },
+                            enabled = hasSubmissionsToGrade
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Grade All with AI")
+                        }
+
+                        // This is your existing button
+                        Button(
+                            onClick = onSendAll,
+                            enabled = hasPendingFeedback
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Send All Pending")
+                        }
+                    }
                 }
             }
         }
     }
 }
-
-
-// --- Other Components (Unchanged logic, minor styling might be inherited) ---
 
 @Composable
 fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
@@ -822,6 +876,7 @@ fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
             confirmButton = {
                 Button(onClick = {
                     onSwitchRole()
+                    // Navigate to splash to re-evaluate the start destination
                     navController.navigate(AptusTutorScreen.Splash.name) {
                         popUpTo(0) { inclusive = true }
                     }
@@ -844,5 +899,30 @@ fun copyUriToInternalStorage(context: Context, uri: Uri, newName: String): Strin
     } catch (e: Exception) {
         e.printStackTrace()
         null
+    }
+}
+
+@Composable
+fun EmptyState(icon: ImageVector, headline: String, subline: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp, horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = headline,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        )
+        Text(text = headline, style = MaterialTheme.typography.titleLarge)
+        Text(
+            text = subline,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
     }
 }

@@ -3,27 +3,24 @@ package com.nexttechtitan.aptustutor.ui.student
 import android.Manifest
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CameraAlt
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +37,7 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.nexttechtitan.aptustutor.data.StudentAssessmentQuestion
+import com.nexttechtitan.aptustutor.utils.FileUtils
 import com.nexttechtitan.aptustutor.utils.ImageUtils
 import kotlinx.coroutines.launch
 import java.io.File
@@ -50,7 +48,6 @@ fun AssessmentScreen(
     viewModel: StudentDashboardViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit
 ) {
-    // --- BATTLE-TESTED LOGIC BLOCK (PRESERVED EXACTLY) ---
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val timeLeft by viewModel.timeLeft.collectAsStateWithLifecycle()
     val assessment = uiState.activeAssessment
@@ -60,11 +57,8 @@ fun AssessmentScreen(
     LaunchedEffect(assessment) {
         if (assessment != null) {
             viewModel.startAssessmentTimer(assessment.durationInMinutes)
-        }
-    }
-
-    LaunchedEffect(assessment) {
-        if (assessment == null) {
+        } else {
+            // If assessment becomes null (e.g., after submission), navigate back.
             onNavigateBack()
         }
     }
@@ -72,23 +66,21 @@ fun AssessmentScreen(
     BackHandler {
         showExitDialog = true
     }
-    // --- END OF PRESERVED LOGIC BLOCK ---
 
     if (assessment == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // This state is brief, so a simple indicator is fine.
             CircularProgressIndicator()
-            Text("Loading Assessment...")
         }
         return
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow, // DESIGN: A neutral, paper-like background.
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
             TopAppBar(
                 title = { Text(assessment.title, maxLines = 1, fontWeight = FontWeight.Bold) },
                 actions = {
-                    // DESIGN: The timer is given a distinct visual container to draw attention to it.
                     Card(
                         modifier = Modifier.padding(end = 16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
@@ -106,7 +98,6 @@ fun AssessmentScreen(
             )
         },
         bottomBar = {
-            // DESIGN: A dedicated BottomAppBar provides a clear, elevated space for the final submission action.
             BottomAppBar(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentPadding = PaddingValues(16.dp)
@@ -149,7 +140,6 @@ fun AssessmentScreen(
     }
 }
 
-// DESIGN: The Question Card is now structured to create a clear separation between question and answer.
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun QuestionCard(
@@ -158,37 +148,59 @@ fun QuestionCard(
     viewModel: StudentDashboardViewModel
 ) {
     val context = LocalContext.current
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var tempImageUriHolder by remember { mutableStateOf<Uri?>(null) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success) {
-            imageUri?.let { uri ->
+            tempImageUriHolder?.let { uri ->
                 scope.launch {
-                    when (val result = ImageUtils.compressImage(context, uri)) {
-                        is ImageUtils.ImageCompressionResult.Success -> {
-                            val compressedFile = File.createTempFile("answer_img_", ".jpg", context.cacheDir)
-                            compressedFile.writeBytes(result.byteArray)
-                            viewModel.updateImageAnswer(question.id, Uri.fromFile(compressedFile))
+                    val snackbarMessage = try {
+                        when (val result = ImageUtils.compressImage(context, uri)) {
+                            is ImageUtils.ImageCompressionResult.Success -> {
+                                val submissionId = viewModel.getSubmissionId()
+                                val permanentPath = FileUtils.saveAnswerImage(
+                                    context = context,
+                                    byteArray = result.byteArray,
+                                    submissionId = submissionId,
+                                    questionId = question.id
+                                )
+
+                                if (permanentPath != null) {
+                                    // Pass the reliable, permanent path to the ViewModel.
+                                    viewModel.updateImageAnswer(question.id, Uri.fromFile(File(permanentPath)))
+                                    "Image captured."
+                                } else {
+                                    "Error saving image."
+                                }
+                            }
+                            is ImageUtils.ImageCompressionResult.Error -> result.message
                         }
-                        is ImageUtils.ImageCompressionResult.Error -> snackbarHostState.showSnackbar(result.message)
+                    } catch (e: Exception) {
+                        Log.e("ImageCapture", "Error in camera result", e)
+                        "An error occurred while processing the image."
                     }
+                    snackbarHostState.showSnackbar(snackbarMessage)
                 }
             }
         }
     }
+
     val cameraPermissionState = rememberPermissionState(permission = Manifest.permission.CAMERA)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column {
-            // --- QUESTION ZONE ---
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                Text("Question $questionNumber", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Question $questionNumber", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("${question.maxScore} marks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
                 Spacer(Modifier.height(12.dp))
                 Text(question.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
 
@@ -211,13 +223,13 @@ fun QuestionCard(
                                 contentScale = ContentScale.Fit
                             )
                         } else {
+                            // Show a loading indicator while the image is being received
                             CircularProgressIndicator()
                         }
                     }
                 }
             }
 
-            // --- ANSWER ZONE ---
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -231,7 +243,9 @@ fun QuestionCard(
                     value = viewModel.textAnswers[question.id] ?: "",
                     onValueChange = { viewModel.updateTextAnswer(question.id, it) },
                     label = { Text("Type your answer here") },
-                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 120.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 120.dp)
                 )
 
                 OrDivider()
@@ -241,7 +255,7 @@ fun QuestionCard(
                     onLaunchCamera = {
                         if (cameraPermissionState.status.isGranted) {
                             val uri = ComposeFileProvider.getImageUri(context)
-                            imageUri = uri
+                            tempImageUriHolder = uri
                             cameraLauncher.launch(uri)
                         } else {
                             cameraPermissionState.launchPermissionRequest()
@@ -254,7 +268,6 @@ fun QuestionCard(
     }
 }
 
-// DESIGN: This component now correctly handles the Capture/Retake logic without a "remove" option.
 @Composable
 private fun ImageAnswerInput(
     capturedImageUri: Uri?,
@@ -265,7 +278,6 @@ private fun ImageAnswerInput(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Show the captured image if it exists.
         if (capturedImageUri != null) {
             Box {
                 Image(
@@ -281,20 +293,16 @@ private fun ImageAnswerInput(
             }
         }
 
-        // The button text and style changes depending on whether an image has already been taken.
         val buttonText = if (capturedImageUri == null) "Capture Written Answer" else "Retake Picture"
-        val button: @Composable () -> Unit = {
+        val buttonIsPrimary = capturedImageUri == null
+
+        if (buttonIsPrimary) {
             Button(onClick = onLaunchCamera) {
                 Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text(buttonText)
             }
-        }
-
-        if (capturedImageUri == null) {
-            button()
         } else {
-            // Use an OutlinedButton for the secondary "Retake" action.
             OutlinedButton(onClick = onLaunchCamera) {
                 Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
@@ -304,28 +312,28 @@ private fun ImageAnswerInput(
     }
 }
 
-// DESIGN: A reusable, styled divider.
 @Composable
 private fun OrDivider() {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         HorizontalDivider(Modifier.weight(1f))
-        Text("OR", style = MaterialTheme.typography.labelSmall)
+        Text("OR", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         HorizontalDivider(Modifier.weight(1f))
     }
 }
 
-// DESIGN: A styled confirmation dialog.
 @Composable
 private fun ExitConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = "Warning") },
-        title = { Text("Exit Assessment?") },
-        text = { Text("Are you sure you want to exit? Your progress will be lost and your assessment will be submitted as is.") },
+        title = { Text("Submit Assessment?") },
+        text = { Text("Are you sure you want to exit? Your assessment will be submitted as is.") },
         confirmButton = {
             Button(
                 onClick = onConfirm,
@@ -337,9 +345,6 @@ private fun ExitConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit)
         }
     )
 }
-
-
-// --- HELPER FUNCTIONS (Unchanged) ---
 
 private fun formatTime(seconds: Int): String {
     val minutes = seconds / 60

@@ -65,12 +65,19 @@ data class AssessmentQuestion(
     val text: String,
     val type: QuestionType,
     val markingGuide: String,
-    var questionImagePath: String? = null
+    var questionImagePath: String? = null,
+    val maxScore: Int = 10
 )
 
 enum class QuestionType {
     TEXT_INPUT,
     HANDWRITTEN_IMAGE
+}
+
+enum class FeedbackStatus {
+    PENDING_SEND,
+    SENT_PENDING_ACK,
+    DELIVERED
 }
 
 // A student's answer to a single question
@@ -83,7 +90,6 @@ data class AssessmentAnswer(
 )
 
 data class SessionHistoryItem(
-    @Embedded
     val sessionWithDetails: SessionWithClassDetails,
     val hasSubmission: Boolean
 )

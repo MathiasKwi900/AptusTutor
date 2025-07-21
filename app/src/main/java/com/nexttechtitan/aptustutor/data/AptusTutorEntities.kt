@@ -82,7 +82,7 @@ data class SessionWithClassDetails(
         parentColumn = "classId",
         entityColumn = "classId"
     )
-    val classProfile: ClassProfile
+    val classProfile: ClassProfile?
 )
 
 /**
@@ -110,8 +110,7 @@ data class SessionAttendance(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sessionId: String,
     val studentId: String,
-    val status: String, // e.g., "Present", "Absent"
-    // We can add quiz results here later
+    val status: String
 )
 
 @Entity(tableName = "assessments")
@@ -132,7 +131,8 @@ data class AssessmentSubmission(
     val studentId: String,
     val studentName: String,
     val assessmentId: String,
-    var answers: List<AssessmentAnswer>
+    val answers: List<AssessmentAnswer>?,
+    val feedbackStatus: FeedbackStatus = FeedbackStatus.PENDING_SEND
 )
 
 class Converters {
