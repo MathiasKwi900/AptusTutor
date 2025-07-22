@@ -126,7 +126,6 @@ fun TutorDashboardScreen(
             AnimatedVisibility(visible = !isSessionActive) {
                 CenterAlignedTopAppBar(
                     title = { Text("Tutor Dashboard") },
-                    // NEW: Actions menu now includes a link to the session history.
                     actions = {
                         IconButton(onClick = onNavigateToHistory) {
                             Icon(Icons.Rounded.History, contentDescription = "Session History")
@@ -646,16 +645,6 @@ fun QuestionEditor(
     val context = LocalContext.current
     var tempImageUri by remember { mutableStateOf<Uri?>(null) }
 
-    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        uri?.let { onImageAttached(copyUriToInternalStorage(context, it, "q_${question.id}")) }
-    }
-    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success) {
-            tempImageUri?.let { onImageAttached(copyUriToInternalStorage(context, it, "q_${question.id}")) }
-        }
-    }
-    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
-
     Card(
         modifier = Modifier
             .padding(vertical = 8.dp)
@@ -670,43 +659,6 @@ fun QuestionEditor(
                 }
             }
             OutlinedTextField(value = question.text, onValueChange = onQuestionChange, label = { Text("Question Text") }, modifier = Modifier.fillMaxWidth())
-
-            AnimatedVisibility(visible = question.questionImagePath != null) {
-                Box(contentAlignment = Alignment.TopEnd) {
-                    Image(
-                        painter = rememberAsyncImagePainter(model = File(question.questionImagePath ?: "")),
-                        contentDescription = "Question Image",
-                        modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Fit
-                    )
-                    IconButton(onClick = { onImageAttached(null) }) {
-                        Icon(Icons.Rounded.Close, "Remove Image", tint = Color.White, modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape))
-                    }
-                }
-            }
-
-            AnimatedVisibility(visible = question.questionImagePath == null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { imagePickerLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                        Text("Gallery")
-                    }
-                    OutlinedButton(onClick = {
-                        if (cameraPermissionState.status.isGranted) {
-                            val uri = ComposeFileProvider.getImageUri(context)
-                            tempImageUri = uri
-                            cameraLauncher.launch(uri)
-                        } else {
-                            cameraPermissionState.launchPermissionRequest()
-                        }
-                    }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                        Text("Camera")
-                    }
-                }
-            }
             OutlinedTextField(value = question.markingGuide, onValueChange = onMarkingGuideChange, label = { Text("Marking Guide / Correct Answer") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
                 value = question.maxScore.toString(),
@@ -860,7 +812,16 @@ fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
     }
     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
         DropdownMenuItem(
+            text = { Text("AI Model Settings") },
+            leadingIcon = { Icon(Icons.Rounded.Lightbulb, null) },
+            onClick = {
+                showMenu = false
+                navController.navigate(AptusTutorScreen.AiSettings.name)
+            }
+        )
+        DropdownMenuItem(
             text = { Text("Switch Role") },
+            leadingIcon = { Icon(Icons.Rounded.SwapHoriz, null) },
             onClick = {
                 showMenu = false
                 showDialog = true
@@ -884,21 +845,6 @@ fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
             },
             dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }
         )
-    }
-}
-
-fun copyUriToInternalStorage(context: Context, uri: Uri, newName: String): String? {
-    return try {
-        val inputStream = context.contentResolver.openInputStream(uri)
-        val file = File(context.filesDir, "$newName.jpg")
-        val outputStream = FileOutputStream(file)
-        inputStream?.copyTo(outputStream)
-        inputStream?.close()
-        outputStream.close()
-        file.absolutePath
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
     }
 }
 
@@ -926,3 +872,111 @@ fun EmptyState(icon: ImageVector, headline: String, subline: String) {
         )
     }
 }
+
+/*
+ // V2 FEATURE: Image-based questions from the tutor are temporarily disabled.
+// The underlying data model still supports `questionImagePath`, but the UI
+// for attaching images is commented out to simplify the initial release.
+// This can be re-enabled when the two-step AI processing for image questions is implemented.
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun QuestionEditor(
+    questionNumber: Int,
+    question: AssessmentQuestion,
+    onQuestionChange: (String) -> Unit,
+    onMarkingGuideChange: (String) -> Unit,
+    onMaxScoreChange: (Int) -> Unit,
+    onImageAttached: (String?) -> Unit,
+    onDelete: () -> Unit
+) {
+    val context = LocalContext.current
+    var tempImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { onImageAttached(copyUriToInternalStorage(context, it, "q_${question.id}")) }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            tempImageUri?.let { onImageAttached(copyUriToInternalStorage(context, it, "q_${question.id}")) }
+        }
+    }
+    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+
+    Card(
+        modifier = Modifier
+            .padding(vertical = 8.dp)
+            .fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Question #$questionNumber", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDelete, enabled = questionNumber > 1) {
+                    Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete Question", tint = if (questionNumber > 1) MaterialTheme.colorScheme.error else Color.Gray)
+                }
+            }
+            OutlinedTextField(value = question.text, onValueChange = onQuestionChange, label = { Text("Question Text") }, modifier = Modifier.fillMaxWidth())
+
+            AnimatedVisibility(visible = question.questionImagePath != null) {
+                Box(contentAlignment = Alignment.TopEnd) {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = File(question.questionImagePath ?: "")),
+                        contentDescription = "Question Image",
+                        modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                    IconButton(onClick = { onImageAttached(null) }) {
+                        Icon(Icons.Rounded.Close, "Remove Image", tint = Color.White, modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape))
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = question.questionImagePath == null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { imagePickerLauncher.launch("image/*") }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Gallery")
+                    }
+                    OutlinedButton(onClick = {
+                        if (cameraPermissionState.status.isGranted) {
+                            val uri = ComposeFileProvider.getImageUri(context)
+                            tempImageUri = uri
+                            cameraLauncher.launch(uri)
+                        } else {
+                            cameraPermissionState.launchPermissionRequest()
+                        }
+                    }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Camera")
+                    }
+                }
+            }
+            OutlinedTextField(value = question.markingGuide, onValueChange = onMarkingGuideChange, label = { Text("Marking Guide / Correct Answer") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                value = question.maxScore.toString(),
+                onValueChange = { onMaxScoreChange(it.toIntOrNull() ?: 0) },
+                label = { Text("Max Score") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.align(Alignment.End)
+            )
+        }
+    }
+}
+
+fun copyUriToInternalStorage(context: Context, uri: Uri, newName: String): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri)
+        val file = File(context.filesDir, "$newName.jpg")
+        val outputStream = FileOutputStream(file)
+        inputStream?.copyTo(outputStream)
+        inputStream?.close()
+        outputStream.close()
+        file.absolutePath
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+ */

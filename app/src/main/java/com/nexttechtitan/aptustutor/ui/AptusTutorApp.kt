@@ -17,6 +17,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.nexttechtitan.aptustutor.ui.main.MainViewModel
 import com.nexttechtitan.aptustutor.ui.roleselection.RoleSelectionScreen
+import com.nexttechtitan.aptustutor.ui.settings.AiSettingsScreen
 import com.nexttechtitan.aptustutor.ui.student.AssessmentScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardViewModel
@@ -25,7 +26,6 @@ import com.nexttechtitan.aptustutor.ui.tutor.SubmissionDetailsScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorDashboardScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorHistoryScreen
 
-// Simple enum for screen routes
 enum class AptusTutorScreen {
     Splash,
     RoleSelection,
@@ -34,7 +34,8 @@ enum class AptusTutorScreen {
     StudentDashboard,
     AssessmentScreen,
     SubmissionDetailsScreen,
-    SubmissionResult
+    SubmissionResult,
+    AiSettings
 }
 
 @Composable
@@ -125,6 +126,9 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
             arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
         ) {
             SubmissionResultScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(AptusTutorScreen.AiSettings.name) {
+            AiSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
     }
 }

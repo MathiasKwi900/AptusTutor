@@ -1,10 +1,6 @@
-// File: data/UiState.kt
 package com.nexttechtitan.aptustutor.data
 
-import androidx.room.Embedded
 import java.util.UUID
-
-// --- Data for UI display ---
 
 // Represents a session a student can see and request to join
 data class DiscoveredSession(

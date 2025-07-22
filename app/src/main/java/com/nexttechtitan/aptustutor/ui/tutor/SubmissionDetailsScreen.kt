@@ -3,6 +3,7 @@ package com.nexttechtitan.aptustutor.ui.tutor
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -10,6 +11,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Warning
@@ -91,6 +93,21 @@ fun SubmissionDetailsScreen(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    FilledTonalButton(
+                        onClick = { viewModel.gradeEntireSubmission() },
+                        enabled = !uiState.isGradingEntireSubmission && !uiState.isModelLoading && !uiState.feedbackSent,
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        if (uiState.isModelLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(ButtonDefaults.IconSize))
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Preparing AI...")
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Grade All with AI")
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Grade All")
+                        }
+                    }
                 }
             )
         },
@@ -115,29 +132,68 @@ fun SubmissionDetailsScreen(
             return@Scaffold
         }
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            item {
-                Text(assessment.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("Submitted by ${submission.studentName}", style = MaterialTheme.typography.titleMedium)
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    Text(
+                        assessment.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Submitted by ${submission.studentName}",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
+                    val isSaved = uiState.savedQuestionIds.contains(question.id)
+                    val isAiGradingThisQuestion = uiState.isGradingQuestionId == question.id
+                    GradedAnswerCard(
+                        questionIndex = index + 1,
+                        question = question,
+                        answer = draftAnswers[question.id],
+                        isSaved = isSaved,
+                        isFeedbackSent = uiState.feedbackSent,
+                        isAiGrading = isAiGradingThisQuestion,
+                        onScoreChange = { newScore ->
+                            viewModel.onScoreChange(
+                                question.id,
+                                newScore,
+                                question.maxScore
+                            )
+                        },
+                        onFeedbackChange = { newFeedback ->
+                            viewModel.onFeedbackChange(
+                                question.id,
+                                newFeedback
+                            )
+                        },
+                        onSaveGrade = { viewModel.saveGrade(question.id) },
+                        onGradeWithAi = { /* This button is commented out for now */ }
+                    )
+                }
             }
-            itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
-                val isSaved = uiState.savedQuestionIds.contains(question.id)
-                GradedAnswerCard(
-                    questionIndex = index + 1,
-                    question = question,
-                    answer = draftAnswers[question.id],
-                    isSaved = isSaved,
-                    isFeedbackSent = uiState.feedbackSent,
-                    onScoreChange = { newScore -> viewModel.onScoreChange(question.id, newScore, question.maxScore) },
-                    onFeedbackChange = { newFeedback -> viewModel.onFeedbackChange(question.id, newFeedback) },
-                    onSaveGrade = { viewModel.saveGrade(question.id) }
-                )
+            if (uiState.isGradingEntireSubmission) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
+                        .clickable(enabled = false, onClick = {}),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(64.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = uiState.gradingProgressText ?: "AI Grading in progress...",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
             }
         }
     }
@@ -171,10 +227,12 @@ fun GradedAnswerCard(
     question: AssessmentQuestion,
     answer: AssessmentAnswer?,
     isSaved: Boolean,
+    isAiGrading: Boolean,
     isFeedbackSent: Boolean,
     onScoreChange: (String) -> Unit,
     onFeedbackChange: (String) -> Unit,
-    onSaveGrade: () -> Unit
+    onSaveGrade: () -> Unit,
+    onGradeWithAi: () -> Unit
 ) {
     val isSavable = answer?.score != null && !answer.feedback.orEmpty().isNotBlank()
     val isReadOnly = (isSaved || isFeedbackSent)
@@ -249,7 +307,8 @@ fun GradedAnswerCard(
                 Spacer(Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedTextField(
                         value = answer?.score?.toString() ?: "",
@@ -278,17 +337,29 @@ fun GradedAnswerCard(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // AI Button - Future functionality
+                    /*
+                    // V2 FEATURE: Per-question grading will be enabled when needed.
+                    // For now, we use the main "Grade All" button.
                     FilledTonalButton(
-                        onClick = { /* TODO: Wire to Gemma 3n */ },
-                        enabled = !isFeedbackSent,
+                        onClick = onGradeWithAi,
+                        enabled = !isFeedbackSent && !isAiGrading
                     ) {
-                        Icon(Icons.Rounded.Lightbulb, contentDescription = null)
-                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                        Text("Grade with AI")
+                        if (isAiGrading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(ButtonDefaults.IconSize),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Grading...")
+                        } else {
+                            Icon(Icons.Rounded.Lightbulb, contentDescription = "Grade with AI")
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Grade with AI")
+                        }
                     }
+                     */
                     Spacer(Modifier.width(8.dp))
-                    // The main Save button for the question
                     Button(
                         onClick = onSaveGrade,
                         enabled = isSavable && !isSaved && !isFeedbackSent
