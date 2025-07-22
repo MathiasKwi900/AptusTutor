@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.first
 class AIBatchGradingWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    // Hilt allows us to inject the repository directly into our worker.
     private val repository: AptusTutorRepository
 ) : CoroutineWorker(appContext, workerParams) {
 

@@ -83,7 +83,11 @@ dependencies {
     implementation(libs.firebase.storage.ktx)
 
     // Google AI Edge (Gemma 3n)
-    implementation(libs.mediapipe.tasks.genai)
+    implementation("com.google.mediapipe:tasks-core:0.10.26")
+    implementation("com.google.mediapipe:tasks-genai:0.10.25")
+    implementation("com.google.mediapipe:tasks-vision:0.10.26")
+    implementation("com.google.mediapipe:tasks-text:0.10.26")
+    implementation("com.google.mediapipe:tasks-audio:0.10.26")
 
     // Nearby Connections for Offline Sharing
     implementation(libs.play.services.nearby)

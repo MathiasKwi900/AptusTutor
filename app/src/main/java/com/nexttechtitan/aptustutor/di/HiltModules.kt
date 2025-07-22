@@ -8,6 +8,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.work.WorkManager
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.ConnectionsClient
+import com.google.firebase.storage.FirebaseStorage
 import com.google.gson.Gson
 import com.nexttechtitan.aptustutor.data.AptusTutorDatabase
 import com.nexttechtitan.aptustutor.data.ClassDao
@@ -76,5 +77,11 @@ object AppModule {
     @Singleton
     fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
         return WorkManager.getInstance(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideFirebaseStorage(): FirebaseStorage {
+        return FirebaseStorage.getInstance()
     }
 }
