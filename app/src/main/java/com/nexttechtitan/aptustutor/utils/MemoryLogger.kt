@@ -16,7 +16,7 @@ class MemoryLogger @Inject constructor(
     fun logMemory(tag: String, event: String) {
         val memoryInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memoryInfo)
-        val availableMegs = memoryInfo.availMem / 1048576L // Bytes to MB
+        val availableMegs = memoryInfo.availMem / 1048576L
         val totalMegs = memoryInfo.totalMem / 1048576L
         Log.i(tag, "MEMORY_LOG | $event | Available RAM: $availableMegs MB / $totalMegs MB")
     }
