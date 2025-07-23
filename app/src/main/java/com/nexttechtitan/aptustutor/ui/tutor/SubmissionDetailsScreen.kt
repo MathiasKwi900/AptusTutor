@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,9 +29,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
+import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
+import com.nexttechtitan.aptustutor.data.ModelStatus
+import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
@@ -39,9 +44,14 @@ import java.io.File
 @Composable
 fun SubmissionDetailsScreen(
     viewModel: SubmissionDetailsViewModel = hiltViewModel(),
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    navController: NavHostController
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val modelState by viewModel.modelState.collectAsStateWithLifecycle()
+    val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle(initialValue = ModelStatus.NOT_DOWNLOADED)
+    val showAiGradingDialog by viewModel.showAiGradingDialog.collectAsStateWithLifecycle()
+    val isPleCacheComplete by viewModel.isPleCacheComplete.collectAsStateWithLifecycle()
     val submission = uiState.submission
     val assessment = uiState.assessment
     val draftAnswers = uiState.draftAnswers
@@ -78,6 +88,16 @@ fun SubmissionDetailsScreen(
         draftAnswers.values.sumOf { it.score ?: 0 }
     }
 
+    if (showAiGradingDialog) {
+        AiGradingConfirmationDialog(
+            onDismiss = viewModel::onAiGradingDialogDismissed,
+            onNavigateToSettings = {
+                viewModel.onAiGradingDialogDismissed()
+                navController.navigate(AptusTutorScreen.AiSettings.name)
+            }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -93,15 +113,24 @@ fun SubmissionDetailsScreen(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    val modelIsNotReady = modelStatus == ModelStatus.NOT_DOWNLOADED || modelStatus == ModelStatus.DOWNLOADING
                     FilledTonalButton(
-                        onClick = { viewModel.gradeEntireSubmission() },
-                        enabled = !uiState.isGradingEntireSubmission && !uiState.isModelLoading && !uiState.feedbackSent,
+                        onClick = {
+                            if (modelIsNotReady) {
+                                navController.navigate(AptusTutorScreen.AiSettings.name)
+                            } else {
+                                if (isPleCacheComplete) {
+                                    viewModel.gradeEntireSubmission()
+                                } else {
+                                    viewModel.onGradeWithAiClicked()
+                                }
+                            }
+                        },
+                        enabled = !uiState.isGradingEntireSubmission && !uiState.feedbackSent,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
-                        if (uiState.isModelLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("Preparing AI...")
+                        if (modelState is GemmaAiService.ModelState.Failed) {
+                            "AI N/A"
                         } else {
                             Icon(Icons.Default.AutoAwesome, contentDescription = "Grade All with AI")
                             Spacer(Modifier.width(ButtonDefaults.IconSpacing))
@@ -207,6 +236,36 @@ fun SubmissionDetailsScreen(
             }
         )
     }
+}
+
+@Composable
+fun AiGradingConfirmationDialog(
+    onDismiss: () -> Unit,
+    onNavigateToSettings: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.RocketLaunch, contentDescription = null) },
+        title = { Text("AI Is Not Yet Initialized!") },
+        text = {
+            Text("The AI model is ready but must be initialized before usage. To do so, we recommend you visit settings")
+        },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Go to Settings")
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        }
+    )
 }
 
 @Composable

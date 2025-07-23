@@ -11,6 +11,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
@@ -27,11 +28,13 @@ import javax.inject.Inject
 class AiSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPreferencesRepo: UserPreferencesRepository,
-    private val workManager: WorkManager
+    private val workManager: WorkManager,
+    private val gemmaAiService: GemmaAiService
 ) : ViewModel() {
 
     val modelStatus = userPreferencesRepo.aiModelStatusFlow
     val modelPath = userPreferencesRepo.aiModelPathFlow
+    val modelState = gemmaAiService.modelState
 
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
@@ -39,7 +42,7 @@ class AiSettingsViewModel @Inject constructor(
     fun startCloudDownload() {
         viewModelScope.launch {
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.UNMETERED) // Wi-Fi only
+                .setRequiredNetworkType(NetworkType.UNMETERED)
                 .build()
 
             val downloadRequest = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
@@ -78,6 +81,12 @@ class AiSettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 _toastEvents.emit("Error: Could not load model from file.")
             }
+        }
+    }
+
+    fun finalizeAiSetup() {
+        viewModelScope.launch {
+            gemmaAiService.generatePleCache()
         }
     }
 }

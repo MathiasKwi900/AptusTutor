@@ -12,15 +12,14 @@ import com.nexttechtitan.aptustutor.data.Assessment
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
-import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -38,14 +37,13 @@ data class SubmissionDetailsUiState(
     val feedbackSent: Boolean = false,
     val isGradingQuestionId: String? = null,
     val isGradingEntireSubmission: Boolean = false,
-    val gradingProgressText: String? = null,
-    val isModelLoading: Boolean = true
+    val gradingProgressText: String? = null
 )
 
 @HiltViewModel
 class SubmissionDetailsViewModel @Inject constructor(
-    private val repository: AptusTutorRepository,
     private val userPreferencesRepo: UserPreferencesRepository,
+    private val repository: AptusTutorRepository,
     private val gemmaAiService: GemmaAiService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
@@ -61,9 +59,20 @@ class SubmissionDetailsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SubmissionDetailsUiState())
     val uiState: StateFlow<SubmissionDetailsUiState> = _uiState.asStateFlow()
 
+    val modelState = gemmaAiService.modelState
+    val modelStatus = userPreferencesRepo.aiModelStatusFlow
+
+    private val _showAiGradingDialog = MutableStateFlow(false)
+    val showAiGradingDialog: StateFlow<Boolean> = _showAiGradingDialog.asStateFlow()
+
+    private val _isPleCacheComplete = MutableStateFlow(false)
+    val isPleCacheComplete: StateFlow<Boolean> = _showAiGradingDialog.asStateFlow()
+
     init {
         Log.d(TAG, "Initializing for submissionId: $submissionId")
         viewModelScope.launch {
+            val pleCacheComplete = userPreferencesRepo.pleCacheCompleteFlow.first()
+            _isPleCacheComplete.value = pleCacheComplete
             val initialSubmission = repository.getSubmissionFlow(submissionId).filterNotNull().first()
             val hasFeedbackBeenSent = isEntireSubmissionGraded(initialSubmission)
 
@@ -88,24 +97,14 @@ class SubmissionDetailsViewModel @Inject constructor(
         repository.getAssessmentFlowBySubmission(submissionId)
             .onEach { assessment -> _uiState.update { it.copy(assessment = assessment) } }
             .launchIn(viewModelScope)
-
-        prepareAiModel()
     }
 
-    private fun prepareAiModel() {
-        viewModelScope.launch(Dispatchers.IO) {
-            Log.d(TAG, "Starting AI model pre-loading...")
-            _uiState.update { it.copy(isModelLoading = true) }
-            val modelPath = userPreferencesRepo.aiModelPathFlow.first()
-            if (modelPath != null) {
-                gemmaAiService.getOrCreateLlmInferenceInstance(modelPath)
-                Log.d(TAG, "AI model is ready.")
-            } else {
-                Log.e(TAG, "Cannot pre-load model: path is null.")
-                _toastEvents.emit("Could not prepare AI model.")
-            }
-            _uiState.update { it.copy(isModelLoading = false) }
-        }
+    fun onGradeWithAiClicked() {
+        _showAiGradingDialog.value = true
+    }
+
+    fun onAiGradingDialogDismissed() {
+        _showAiGradingDialog.value = false
     }
 
     private fun isEntireSubmissionGraded(submission: AssessmentSubmission): Boolean {
@@ -188,28 +187,17 @@ class SubmissionDetailsViewModel @Inject constructor(
         return (_uiState.value.assessment?.questions?.indexOfFirst { it.id == questionId } ?: -1) + 1
     }
 
-    /**
-     * Public function to trigger grading for the entire submission.
-     * This will be called by the new "Grade All with AI" button.
-     */
     fun gradeEntireSubmission() {
+        _showAiGradingDialog.value = false
         viewModelScope.launch(Dispatchers.Default) {
             Log.d(TAG, "gradeEntireSubmission called.")
+            if (gemmaAiService.modelState.value !is GemmaAiService.ModelState.Ready) {
+                _toastEvents.emit("AI is not ready yet. Still preparing in the background.")
+                return@launch
+            }
             if (uiState.value.isGradingEntireSubmission || uiState.value.isGradingQuestionId != null) {
                 Log.w(TAG, "AI is already busy grading the entire submission.")
                 _toastEvents.emit("AI is already busy.")
-                return@launch
-            }
-
-            val modelStatus = userPreferencesRepo.aiModelStatusFlow.first()
-            if (modelStatus != ModelStatus.DOWNLOADED) {
-                _toastEvents.emit("Model not available. Download it from AI Model Settings.")
-                return@launch
-            }
-            val modelPath = userPreferencesRepo.aiModelPathFlow.first()
-            if (modelPath == null) {
-                Log.e(TAG, "Model path not found, aborting AI grading.")
-                _toastEvents.emit("Error: Model path not found.")
                 return@launch
             }
 
@@ -230,7 +218,7 @@ class SubmissionDetailsViewModel @Inject constructor(
                 _uiState.update { it.copy(gradingProgressText = progressText) }
 
                 val answer = uiState.value.submission?.answers?.find { it.questionId == question.id }
-                gradeSingleQuestionInternal(question, answer, modelPath)
+                gradeSingleQuestionInternal(question, answer)
             }
 
             Log.i(TAG, "AI grading complete for all questions.")
@@ -243,14 +231,14 @@ class SubmissionDetailsViewModel @Inject constructor(
      * Internal function to handle grading a single question.
      * This contains the core logic that is looped by gradeEntireSubmission.
      */
-    private suspend fun gradeSingleQuestionInternal(question: AssessmentQuestion, answer: AssessmentAnswer?, modelPath: String) {
+    private suspend fun gradeSingleQuestionInternal(question: AssessmentQuestion, answer: AssessmentAnswer?) {
         _uiState.update { it.copy(isGradingQuestionId = question.id) }
         Log.d(TAG, "gradeSingleQuestionInternal started for Q-ID: ${question.id}")
 
         val prompt = buildPrompt(question, answer)
         val imageBitmap: Bitmap? = answer?.imageFilePath?.let { BitmapFactory.decodeFile(it) }
 
-        val result = gemmaAiService.grade(prompt, modelPath, imageBitmap)
+        val result = gemmaAiService.grade(prompt, imageBitmap)
 
         result.onSuccess { response ->
             Log.i(TAG, "Successfully graded Q-ID: ${question.id}. Score: ${response.score}")
@@ -273,12 +261,6 @@ class SubmissionDetailsViewModel @Inject constructor(
         }
 
         _uiState.update { it.copy(isGradingQuestionId = null) }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        Log.d(TAG, "ViewModel cleared. Releasing Gemma AI model from memory.")
-        gemmaAiService.releaseModel()
     }
 
     private fun buildPrompt(question: AssessmentQuestion, answer: AssessmentAnswer?): String {
@@ -307,11 +289,11 @@ class SubmissionDetailsViewModel @Inject constructor(
 
             Your task: $answerInstruction
 
-            Respond ONLY with a valid JSON object in the format shown in this example:
+            Respond ONLY with a valid JSON object in the format shown in this example: IMPORTANT: The "feedback" text must be concise and no more than 30 words.
             ```json
             {
               "score": 3,
-              "feedback": "Your answer was on the right track by mentioning photosynthesis, but the correct answer required specifying that it happens in the chloroplasts. You were almost there!"
+              "feedback": "Your answer was on the right track but missed a key detail about chloroplasts. Good effort!"
             }
             ```
         """.trimIndent()

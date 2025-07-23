@@ -14,7 +14,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     private val _startDestination = MutableStateFlow<String?>(null)
@@ -29,10 +29,10 @@ class MainViewModel @Inject constructor(
             val isOnboardingComplete = userPreferencesRepository.onboardingCompleteFlow.first()
             if (isOnboardingComplete) {
                 val userRole = userPreferencesRepository.userRoleFlow.first()
-                _startDestination.value = when (userRole) {
-                    "TUTOR" -> AptusTutorScreen.TutorDashboard.name
-                    "STUDENT" -> AptusTutorScreen.StudentDashboard.name
-                    else -> AptusTutorScreen.RoleSelection.name
+                if (userRole == "TUTOR") {
+                    _startDestination.value = AptusTutorScreen.TutorDashboard.name
+                } else {
+                    _startDestination.value = AptusTutorScreen.StudentDashboard.name
                 }
             } else {
                 _startDestination.value = AptusTutorScreen.RoleSelection.name

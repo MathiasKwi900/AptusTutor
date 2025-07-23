@@ -18,6 +18,8 @@ import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.nexttechtitan.aptustutor.ai.AIBatchGradingWorker
+import com.nexttechtitan.aptustutor.ai.GemmaAiService
+import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
@@ -40,7 +42,8 @@ data class SubmissionWithStatus(
 class TutorDashboardViewModel @Inject constructor(
     private val repository: AptusTutorRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val workManager: WorkManager
+    private val workManager: WorkManager,
+    private val gemmaAiService: GemmaAiService
 ) : ViewModel() {
 
     val uiState = repository.tutorUiState
@@ -113,6 +116,17 @@ class TutorDashboardViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = false
         )
+
+    /*
+    init {
+        viewModelScope.launch {
+            val userRole = userPreferencesRepository.userRoleFlow.first()
+            if (userRole == "TUTOR") {
+                gemmaAiService.initiateLoadModelGraph()
+            }
+        }
+    }
+     */
 
     fun sendAllPendingFeedback() {
         val sessionId = uiState.value.activeSession?.sessionId ?: return

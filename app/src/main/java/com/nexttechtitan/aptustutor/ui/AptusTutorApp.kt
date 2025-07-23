@@ -94,7 +94,7 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
             route = "${AptusTutorScreen.SubmissionDetailsScreen.name}/{submissionId}",
             arguments = listOf(navArgument("submissionId") { type = NavType.StringType })
         ) {
-            SubmissionDetailsScreen(onNavigateBack = { navController.popBackStack() })
+            SubmissionDetailsScreen(onNavigateBack = { navController.popBackStack() }, navController = navController)
         }
         composable(AptusTutorScreen.StudentDashboard.name) {
             val studentViewModel: StudentDashboardViewModel = hiltViewModel()
