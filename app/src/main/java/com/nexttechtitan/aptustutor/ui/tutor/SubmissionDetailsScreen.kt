@@ -1,5 +1,6 @@
 package com.nexttechtitan.aptustutor.ui.tutor
 
+import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -49,13 +50,15 @@ fun SubmissionDetailsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val modelState by viewModel.modelState.collectAsStateWithLifecycle()
-    val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle(initialValue = ModelStatus.NOT_DOWNLOADED)
-    val showAiGradingDialog by viewModel.showAiGradingDialog.collectAsStateWithLifecycle()
-    val isPleCacheComplete by viewModel.isPleCacheComplete.collectAsStateWithLifecycle()
+    val modelInitialized by viewModel.modelInitialized.collectAsStateWithLifecycle(initialValue = false)
     val submission = uiState.submission
     val assessment = uiState.assessment
     val draftAnswers = uiState.draftAnswers
     var showSendConfirmationDialog by rememberSaveable { mutableStateOf(false) }
+
+    val isAiReadyForGrading by remember {
+        derivedStateOf { modelState is GemmaAiService.ModelState.ModelReadyCold || modelState is GemmaAiService.ModelState.Ready }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -88,16 +91,6 @@ fun SubmissionDetailsScreen(
         draftAnswers.values.sumOf { it.score ?: 0 }
     }
 
-    if (showAiGradingDialog) {
-        AiGradingConfirmationDialog(
-            onDismiss = viewModel::onAiGradingDialogDismissed,
-            onNavigateToSettings = {
-                viewModel.onAiGradingDialogDismissed()
-                navController.navigate(AptusTutorScreen.AiSettings.name)
-            }
-        )
-    }
-
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -113,24 +106,37 @@ fun SubmissionDetailsScreen(
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    val modelIsNotReady = modelStatus == ModelStatus.NOT_DOWNLOADED || modelStatus == ModelStatus.DOWNLOADING
+
+                    Log.d("AptusTutorDebug", "isAiReadyForGrading: $isAiReadyForGrading and modelInitialized: $modelInitialized")
                     FilledTonalButton(
                         onClick = {
-                            if (modelIsNotReady) {
-                                navController.navigate(AptusTutorScreen.AiSettings.name)
+                            if (isAiReadyForGrading && modelInitialized) {
+                                viewModel.gradeEntireSubmission()
                             } else {
-                                if (isPleCacheComplete) {
-                                    viewModel.gradeEntireSubmission()
-                                } else {
-                                    viewModel.onGradeWithAiClicked()
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = "AI Engine needs a one-time setup. Please go to settings to initialize.",
+                                        actionLabel = "Settings",
+                                        duration = SnackbarDuration.Long
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        navController.navigate(AptusTutorScreen.AiSettings.name)
+                                    }
                                 }
                             }
                         },
-                        enabled = !uiState.isGradingEntireSubmission && !uiState.feedbackSent,
+                        enabled = modelState !is GemmaAiService.ModelState.Failed &&
+                                modelState !is GemmaAiService.ModelState.LoadingModel &&
+                                modelState !is GemmaAiService.ModelState.WarmingUp &&
+                                modelState !is GemmaAiService.ModelState.Busy &&
+                                !uiState.isGradingEntireSubmission &&
+                                !uiState.feedbackSent,
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
                         if (modelState is GemmaAiService.ModelState.Failed) {
-                            "AI N/A"
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "AI Error")
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("AI Error")
                         } else {
                             Icon(Icons.Default.AutoAwesome, contentDescription = "Grade All with AI")
                             Spacer(Modifier.width(ButtonDefaults.IconSpacing))

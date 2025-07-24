@@ -26,7 +26,7 @@ class PleCacheWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
-        if (userPreferencesRepo.pleCacheCompleteFlow.first()) {
+        if (userPreferencesRepo.aiModelInitializedFlow.first()) {
             Log.i(UNIQUE_WORK_NAME, "PLE Caching has already been completed. Skipping.")
             return Result.success()
         }
@@ -60,7 +60,7 @@ class PleCacheWorker @AssistedInject constructor(
                 Log.i(UNIQUE_WORK_NAME, "Stage 2 Complete. Dummy response: $response")
             }
 
-            userPreferencesRepo.setPleCacheComplete(true)
+            userPreferencesRepo.setAiModelInitialized(true)
             Log.i(UNIQUE_WORK_NAME, "Caching successful. Marked as complete.")
             return Result.success()
 
