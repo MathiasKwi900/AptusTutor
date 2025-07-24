@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,7 +32,7 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
         val ONBOARDING_COMPLETE_KEY = stringPreferencesKey("onboarding_complete")
         val AI_MODEL_STATUS_KEY = stringPreferencesKey("ai_model_status")
         val AI_MODEL_PATH_KEY = stringPreferencesKey("ai_model_path")
-        val PLE_CACHE_COMPLETE_KEY = stringPreferencesKey("ple_cache_complete")
+        val AI_MODEL_INITIALIZED_KEY = booleanPreferencesKey("ai_model_initialized")
     }
 
     val userRoleFlow: Flow<String?> = context.dataStore.data.map { it[USER_ROLE_KEY] }
@@ -44,13 +45,13 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
     val aiModelPathFlow: Flow<String?> = context.dataStore.data.map { preferences ->
         preferences[AI_MODEL_PATH_KEY]
     }
-    val pleCacheCompleteFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        (preferences[PLE_CACHE_COMPLETE_KEY] ?: "false").toBoolean()
+    val aiModelInitializedFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[AI_MODEL_INITIALIZED_KEY] ?: false
     }
 
-    suspend fun setPleCacheComplete(isComplete: Boolean) {
+    suspend fun setAiModelInitialized(isInitialized: Boolean) {
         context.dataStore.edit { preferences ->
-            preferences[PLE_CACHE_COMPLETE_KEY] = isComplete.toString()
+            preferences[AI_MODEL_INITIALIZED_KEY] = isInitialized
         }
     }
     suspend fun setAiModel(status: ModelStatus, path: String? = null) {
@@ -60,6 +61,9 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
                 preferences[AI_MODEL_PATH_KEY] = path
             } else {
                 preferences.remove(AI_MODEL_PATH_KEY)
+            }
+            if (status!= ModelStatus.DOWNLOADED) {
+                preferences.remove(AI_MODEL_INITIALIZED_KEY)
             }
         }
     }

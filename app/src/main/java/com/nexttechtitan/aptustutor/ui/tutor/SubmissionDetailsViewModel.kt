@@ -7,6 +7,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
+import com.nexttechtitan.aptustutor.ai.ThermalManager
 import com.nexttechtitan.aptustutor.data.AptusTutorRepository
 import com.nexttechtitan.aptustutor.data.Assessment
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
@@ -45,6 +46,7 @@ class SubmissionDetailsViewModel @Inject constructor(
     private val userPreferencesRepo: UserPreferencesRepository,
     private val repository: AptusTutorRepository,
     private val gemmaAiService: GemmaAiService,
+    private val thermalManager: ThermalManager,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val submissionId: String = savedStateHandle.get("submissionId")!!
@@ -60,19 +62,11 @@ class SubmissionDetailsViewModel @Inject constructor(
     val uiState: StateFlow<SubmissionDetailsUiState> = _uiState.asStateFlow()
 
     val modelState = gemmaAiService.modelState
-    val modelStatus = userPreferencesRepo.aiModelStatusFlow
-
-    private val _showAiGradingDialog = MutableStateFlow(false)
-    val showAiGradingDialog: StateFlow<Boolean> = _showAiGradingDialog.asStateFlow()
-
-    private val _isPleCacheComplete = MutableStateFlow(false)
-    val isPleCacheComplete: StateFlow<Boolean> = _showAiGradingDialog.asStateFlow()
+    val modelInitialized = userPreferencesRepo.aiModelInitializedFlow
 
     init {
         Log.d(TAG, "Initializing for submissionId: $submissionId")
         viewModelScope.launch {
-            val pleCacheComplete = userPreferencesRepo.pleCacheCompleteFlow.first()
-            _isPleCacheComplete.value = pleCacheComplete
             val initialSubmission = repository.getSubmissionFlow(submissionId).filterNotNull().first()
             val hasFeedbackBeenSent = isEntireSubmissionGraded(initialSubmission)
 
@@ -97,14 +91,6 @@ class SubmissionDetailsViewModel @Inject constructor(
         repository.getAssessmentFlowBySubmission(submissionId)
             .onEach { assessment -> _uiState.update { it.copy(assessment = assessment) } }
             .launchIn(viewModelScope)
-    }
-
-    fun onGradeWithAiClicked() {
-        _showAiGradingDialog.value = true
-    }
-
-    fun onAiGradingDialogDismissed() {
-        _showAiGradingDialog.value = false
     }
 
     private fun isEntireSubmissionGraded(submission: AssessmentSubmission): Boolean {
@@ -188,10 +174,10 @@ class SubmissionDetailsViewModel @Inject constructor(
     }
 
     fun gradeEntireSubmission() {
-        _showAiGradingDialog.value = false
         viewModelScope.launch(Dispatchers.Default) {
             Log.d(TAG, "gradeEntireSubmission called.")
-            if (gemmaAiService.modelState.value !is GemmaAiService.ModelState.Ready) {
+            if (gemmaAiService.modelState.value !is GemmaAiService.ModelState.Ready &&
+                gemmaAiService.modelState.value !is GemmaAiService.ModelState.ModelReadyCold) {
                 _toastEvents.emit("AI is not ready yet. Still preparing in the background.")
                 return@launch
             }
@@ -212,7 +198,13 @@ class SubmissionDetailsViewModel @Inject constructor(
             _uiState.update { it.copy(isGradingEntireSubmission = true) }
             _toastEvents.emit("Starting full submission AI grading...")
 
-            questionsToGrade.forEachIndexed { index, question ->
+            for ((index, question) in questionsToGrade.withIndex()) {
+                while (!thermalManager.isSafeToProceed()) {
+                    Log.w(TAG, "Device is overheating. Pausing grading for 15 seconds.")
+                    _uiState.update { it.copy(gradingProgressText = "Device is hot. Cooling down...") }
+                    kotlinx.coroutines.delay(15000)
+                }
+
                 val progressText = "Grading Question ${index + 1} of ${questionsToGrade.size}..."
                 Log.d(TAG, progressText)
                 _uiState.update { it.copy(gradingProgressText = progressText) }
@@ -268,34 +260,38 @@ class SubmissionDetailsViewModel @Inject constructor(
         val answerInstruction: String
 
         if (answer == null || (answer.textResponse.isNullOrBlank() && answer.imageFilePath.isNullOrBlank())) {
-            studentAnswerText = "[NO ANSWER PROVIDED]"
-            answerInstruction = "The student did not provide an answer. Your task is to assign a score of 0 and use the feedback field to politely provide the correct answer from the marking guide."
+            studentAnswerText = ""
+            answerInstruction = "The student did not provide an answer. Your task is to assign a score\n" +
+                    "of 0 and use the feedback field to politely provide the correct answer from the MARKING GUIDE."
         } else {
             studentAnswerText = when {
-                !answer.textResponse.isNullOrBlank() && !answer.imageFilePath.isNullOrBlank() -> """
-                The student provided both a typed answer and a handwritten image. First consider the typed response, then use the image for additional context or to see their work.
+                !answer.textResponse.isNullOrBlank() &&!answer.imageFilePath.isNullOrBlank() -> """
                 Typed Answer: "${answer.textResponse}"
-                """
+                (An image was also provided for context).
+                """.trimIndent()
                 !answer.textResponse.isNullOrBlank() -> "Typed Answer: \"${answer.textResponse}\""
-                else -> "The student provided an image of their handwritten answer. Analyze the image to evaluate their response."
+                else -> "An image of a handwritten answer was provided."
             }
-            answerInstruction = "Analyze the student's answer for conceptual understanding; it does not need to be a perfect word-for-word match. Use your general knowledge on the topic to determine how close their response is to the correct answer's intent. Then, provide specific, comparative feedback. The final score MUST be an integer between 0 and ${question.maxScore}, inclusive."
+            answerInstruction = "Analyze the student's answer for conceptual understanding; it does\n" +
+                    "not need to be a perfect word-for-word match. Use your general knowledge on the topic to determine\n" +
+                    "how close their response is to the correct answer's intent. Then, provide specific, comparative\n" +
+                    "feedback. The final score MUST be an integer between 0 and ${question.maxScore}, inclusive."
         }
 
         return """
-            You are an expert teaching assistant. A student was given the following question, worth a maximum of ${question.maxScore} points: "${question.text}". The correct answer or marking guide is: "${question.markingGuide}".
+        ROLE: Expert Teaching Assistant.
+        TASK: Grade the student's answer.
+        QUESTION: "${question.text}"
+        MARKING GUIDE: "${question.markingGuide}"
+        MAX SCORE: ${question.maxScore}
+        STUDENT ANSWER: $studentAnswerText
+        INSTRUCTIONS: $answerInstruction
 
-            The student's submitted answer is: $studentAnswerText
-
-            Your task: $answerInstruction
-
-            Respond ONLY with a valid JSON object in the format shown in this example: IMPORTANT: The "feedback" text must be concise and no more than 30 words.
-            ```json
-            {
-              "score": 3,
-              "feedback": "Your answer was on the right track but missed a key detail about chloroplasts. Good effort!"
-            }
-            ```
-        """.trimIndent()
+        OUTPUT FORMAT: Respond ONLY with a valid JSON object. Do not add any other text.
+        {
+          "score": <integer score>,
+          "feedback": "<concise feedback, under 30 words>"
+        }
+    """.trimIndent()
     }
 }

@@ -812,6 +812,14 @@ fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
     }
     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
         DropdownMenuItem(
+            text = { Text("Test AI Grading") },
+            leadingIcon = { Icon(Icons.Rounded.Science, null) },
+            onClick = {
+                showMenu = false
+                navController.navigate(AptusTutorScreen.AiTestScreen.name)
+            }
+        )
+        DropdownMenuItem(
             text = { Text("AI Model Settings") },
             leadingIcon = { Icon(Icons.Rounded.Lightbulb, null) },
             onClick = {

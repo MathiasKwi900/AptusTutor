@@ -19,6 +19,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
@@ -33,7 +34,7 @@ class AiSettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val modelStatus = userPreferencesRepo.aiModelStatusFlow
-    val modelPath = userPreferencesRepo.aiModelPathFlow
+    val modelInitialized = userPreferencesRepo.aiModelInitializedFlow
     val modelState = gemmaAiService.modelState
 
     private val _toastEvents = MutableSharedFlow<String>()
@@ -84,9 +85,19 @@ class AiSettingsViewModel @Inject constructor(
         }
     }
 
-    fun finalizeAiSetup() {
+    fun runAiInitialization() {
         viewModelScope.launch {
-            gemmaAiService.generatePleCache()
+            if (modelStatus.first() == ModelStatus.DOWNLOADED) {
+                gemmaAiService.initializeAndWarmUp()
+            } else {
+                _toastEvents.emit("Model must be downloaded first.")
+            }
+        }
+    }
+
+    fun ensureModelLoaded() {
+        viewModelScope.launch {
+            gemmaAiService.ensureModelIsLoaded()
         }
     }
 }

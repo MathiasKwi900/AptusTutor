@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Verified
@@ -30,7 +31,7 @@ fun AiSettingsScreen(
     viewModel: AiSettingsViewModel = hiltViewModel()
 ) {
     val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle(initialValue = ModelStatus.NOT_DOWNLOADED)
-    val modelPath by viewModel.modelPath.collectAsStateWithLifecycle(initialValue = null)
+    val modelInitialized by viewModel.modelInitialized.collectAsStateWithLifecycle(initialValue = false)
     val modelState by viewModel.modelState.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -44,6 +45,12 @@ fun AiSettingsScreen(
     LaunchedEffect(Unit) {
         viewModel.toastEvents.collectLatest { message ->
             snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    LaunchedEffect(modelStatus) {
+        if (modelStatus == ModelStatus.DOWNLOADED) {
+            viewModel.ensureModelLoaded()
         }
     }
 
@@ -73,11 +80,6 @@ fun AiSettingsScreen(
                     modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (modelPath == null) {
-                        Text("Model Status", style = MaterialTheme.typography.titleLarge)
-                        Spacer(Modifier.height(16.dp))
-                    }
-
                     when (modelStatus) {
                         ModelStatus.NOT_DOWNLOADED -> {
                             Text("The Gemma 3n model is not installed.", color = MaterialTheme.colorScheme.error)
@@ -99,10 +101,15 @@ fun AiSettingsScreen(
                             )
                         }
                         ModelStatus.DOWNLOADED -> {
-                            FinalizationCard(
-                                modelState = modelState,
-                                onFinalize = viewModel::finalizeAiSetup
-                            )
+                            if (!modelInitialized) {
+                                Spacer(Modifier.height(16.dp))
+                                InitializationCard(
+                                    modelState = modelState,
+                                    onInitialize = viewModel::runAiInitialization
+                                )
+                            } else {
+                                ReadyCardContent()
+                            }
                         }
                     }
                 }
@@ -151,85 +158,76 @@ fun AiSettingsScreen(
 }
 
 @Composable
-private fun FinalizationCard(
+private fun InitializationCard(
     modelState: GemmaAiService.ModelState,
-    onFinalize: () -> Unit
+    onInitialize: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(4.dp)
-    ) {
+    val isWorking = modelState is GemmaAiService.ModelState.LoadingModel ||
+            modelState is GemmaAiService.ModelState.WarmingUp ||
+            modelState is GemmaAiService.ModelState.Busy
+
+    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(4.dp)) {
         Column(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             when (modelState) {
-                is GemmaAiService.ModelState.Uninitialized -> {
+                is GemmaAiService.ModelState.ModelReadyCold -> {
                     Icon(
                         Icons.Rounded.RocketLaunch,
                         contentDescription = "Initializing",
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Text("Final Step: Initialized & Boost AI Speed", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "Run a one-time process to make AI grading significantly faster. This takes about 10 minutes and does not require internet. Please keep the app open.",
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Button(onClick = onFinalize, modifier = Modifier.fillMaxWidth()) {
-                        Text("Start Finalization")
+                    Text("Final Step: Initialize AI Engine", style = MaterialTheme.typography.headlineSmall)
+                    Text("Run a one-time process to make AI grading significantly faster. This may take several minutes. Please keep the app open.", textAlign = TextAlign.Center)
+                    Button(onClick = onInitialize, modifier = Modifier.fillMaxWidth()) {
+                        Text("Start Initialization")
                     }
                 }
-                is GemmaAiService.ModelState.LoadingGraph -> {
-                    Icon(
-                        Icons.Rounded.HourglassTop,
-                        contentDescription = "Loading",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text("Loading AI...", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "AI Model is loading. Do not close this screen to avoid resetting process.",
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                is GemmaAiService.ModelState.LoadingModel -> {
+                    CircularProgressIndicator()
+                    Text("Loading AI Model...", style = MaterialTheme.typography.titleMedium)
                 }
-                is GemmaAiService.ModelState.LoadedPendingCache, is GemmaAiService.ModelState.GeneratingCache -> {
-                    Icon(
-                        Icons.Rounded.HourglassTop,
-                        contentDescription = "Caching",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text("Catching PLE data...", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "This is the most crucial step and will take sometime. Please be patient.",
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                is GemmaAiService.ModelState.WarmingUp -> {
+                    CircularProgressIndicator()
+                    Text("Warming Up: ${modelState.step}", style = MaterialTheme.typography.titleMedium)
+                    Text("This is the most crucial step and will take some time. Please be patient.", textAlign = TextAlign.Center)
                 }
                 is GemmaAiService.ModelState.Ready -> {
-                    Icon(
-                        Icons.Rounded.Verified,
-                        contentDescription = "Ready",
+                    ReadyCardContent()
+                }
+                is GemmaAiService.ModelState.Failed -> {
+                    Icon(Icons.Rounded.Error,
+                        contentDescription = "Error",
                         modifier = Modifier.size(48.dp),
-                        tint = Color(0xFF34A853) // Google Green
+                        tint = MaterialTheme.colorScheme.primary
                     )
-                    Text("AI Engine is Ready!", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "AptusTutor is now optimized for the fastest possible on-device grading. No further setup is needed.",
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Text("Initialization Failed", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
+                    Text(modelState.error.message?: "An unknown error occurred.", textAlign = TextAlign.Center)
                 }
                 else -> {
-                    //
+                    CircularProgressIndicator()
+                    Text("Please wait...", style = MaterialTheme.typography.titleMedium)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ReadyCardContent() {
+    Icon(
+        Icons.Rounded.Verified,
+        contentDescription = "Ready",
+        modifier = Modifier.size(48.dp),
+        tint = Color(0xFF34A853) // Google Green
+    )
+    Text("AI Engine is Ready!", style = MaterialTheme.typography.headlineSmall)
+    Text(
+        "AptusTutor is now optimized for the fastest possible on-device grading.",
+        textAlign = TextAlign.Center,
+        style = MaterialTheme.typography.bodyMedium
+    )
 }
