@@ -92,8 +92,8 @@ fun StudentDashboardScreen(
         when {
             // Android 13 (API 33) and above
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.NEARBY_WIFI_DEVICES,
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_ADVERTISE,
@@ -101,17 +101,19 @@ fun StudentDashboardScreen(
             )
             // Android 12 (API 31 & 32)
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_ADVERTISE,
                 Manifest.permission.BLUETOOTH_CONNECT
             )
             else -> listOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN
+                Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.ACCESS_WIFI_STATE,
+                Manifest.permission.CHANGE_WIFI_STATE
             )
         }
     }
@@ -149,7 +151,10 @@ fun StudentDashboardScreen(
             // User denied permissions, update state and show the Snackbar
             userWantsToDiscover = false
             scope.launch {
-                snackbarHostState.showSnackbar("Permissions are required to find nearby classes.")
+                snackbarHostState
+                    .showSnackbar("Nearby features require Precise Location. If you granted *Approximate*, please look for this App in your phone Settings to grant *Precise*.",
+                        duration = SnackbarDuration.Long)
+
             }
         }
     }
@@ -419,19 +424,27 @@ fun SessionCard(session: DiscoveredSession, uiState: StudentDashboardUiState, on
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            val isJoiningThisSession = uiState.joiningSessionId == session.endpointId
+            val isWaitingForApproval = uiState.connectionStatus == "Verifying PIN..." && uiState.connectedSession?.endpointId == session.endpointId
+            val isFullyConnected = uiState.connectionStatus == "Connected" && uiState.connectedSession?.endpointId == session.endpointId
+            val displaySession = uiState.connectedSession?.takeIf { it.endpointId == session.endpointId }?: session
+
             Column(modifier = Modifier.weight(1f)) {
-                Text(session.className, style = MaterialTheme.typography.titleMedium)
-                Text("Tutor: ${session.tutorName}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (isWaitingForApproval) {
+                    Text("${displaySession.tutorName}'s Class", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                } else {
+                    Text(displaySession.className, style = MaterialTheme.typography.titleMedium)
+                    Text("Tutor: ${displaySession.tutorName}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            val isConnectedToThisSession = uiState.connectedSession?.sessionId == session.sessionId
-            val isJoiningThisSession = uiState.joiningSessionId == session.sessionId
 
             Button(
                 onClick = onJoin,
-                enabled = !isConnectedToThisSession && !isJoiningThisSession
+                enabled =!isJoiningThisSession &&!isWaitingForApproval &&!isFullyConnected
             ) {
                 when {
-                    isConnectedToThisSession -> Text("Joined")
+                    isFullyConnected -> Text("Joined")
+                    isWaitingForApproval -> Text("Waiting...")
                     isJoiningThisSession -> Text("Joining...")
                     else -> Text("Join")
                 }
@@ -487,10 +500,15 @@ fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: ()
 @Composable
 fun JoinSessionDialog(session: DiscoveredSession, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var pin by remember { mutableStateOf("") }
+    val dialogTitle = if (session.className.isBlank() || session.className == "Connecting...") {
+        "Join ${session.tutorName}'s class"
+    } else {
+        "Join '${session.className}'"
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Link, contentDescription = null) },
-        title = { Text("Join '${session.className}'") },
+        title = { Text(dialogTitle) },
         text = {
             Column {
                 Text("Your tutor will provide a 4-digit PIN to join the session.")

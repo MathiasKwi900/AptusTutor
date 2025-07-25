@@ -11,7 +11,8 @@ data class StudentAssessmentQuestion(
     val text: String,
     val type: QuestionType,
     val questionImageFile: String? = null,
-    val maxScore: Int
+    val maxScore: Int,
+    val options: List<String>? = null
 )
 
 data class AssessmentBlueprint(

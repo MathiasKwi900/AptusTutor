@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,6 +37,7 @@ import coil.request.ImageRequest
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.StudentAssessmentQuestion
 import com.nexttechtitan.aptustutor.utils.FileUtils
 import com.nexttechtitan.aptustutor.utils.ImageUtils
@@ -120,11 +122,22 @@ fun AssessmentScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
-                QuestionCard(
-                    questionNumber = index + 1,
-                    question = question,
-                    viewModel = viewModel
-                )
+                when (question.type) {
+                    QuestionType.MULTIPLE_CHOICE -> {
+                        McqQuestionCard(
+                            questionNumber = index + 1,
+                            question = question,
+                            viewModel = viewModel
+                        )
+                    }
+                    else -> {
+                        QuestionCard(
+                            questionNumber = index + 1,
+                            question = question,
+                            viewModel = viewModel
+                        )
+                    }
+                }
             }
         }
     }
@@ -307,6 +320,64 @@ private fun ImageAnswerInput(
                 Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                 Text(buttonText)
+            }
+        }
+    }
+}
+
+@Composable
+fun McqQuestionCard(
+    questionNumber: Int,
+    question: StudentAssessmentQuestion,
+    viewModel: StudentDashboardViewModel
+) {
+    val selectedOptionIndex = viewModel.textAnswers[question.id]?.toIntOrNull()
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text("Question $questionNumber", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("${question.maxScore} marks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(question.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
+            Spacer(Modifier.height(16.dp))
+
+            // Multiple Choice Options
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                question.options?.forEachIndexed { index, optionText ->
+                    val isSelected = selectedOptionIndex == index
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { viewModel.updateTextAnswer(question.id, index.toString()) },
+                        shape = MaterialTheme.shapes.medium,
+                        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { viewModel.updateTextAnswer(question.id, index.toString()) }
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                text = "${('A' + index)}. $optionText",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
             }
         }
     }

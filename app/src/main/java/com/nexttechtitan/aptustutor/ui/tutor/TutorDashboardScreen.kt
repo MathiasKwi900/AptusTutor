@@ -75,6 +75,8 @@ fun TutorDashboardScreen(
     var showCreateClassDialog by rememberSaveable { mutableStateOf(false) }
     var showStopSessionDialog by rememberSaveable { mutableStateOf(false) }
     var showCreateAssessmentDialog by rememberSaveable { mutableStateOf(false) }
+    var showCreateMcqAssessmentDialog by rememberSaveable { mutableStateOf(false) }
+    var showAssessmentTypeDialog by rememberSaveable { mutableStateOf(false) }
     var selectedClassToStart by remember { mutableStateOf<ClassWithStudents?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -106,7 +108,8 @@ fun TutorDashboardScreen(
             )
             else -> listOf(
                 Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN
+                Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN,
+                Manifest.permission.ACCESS_WIFI_STATE, Manifest.permission.CHANGE_WIFI_STATE
             )
         }
     }
@@ -116,6 +119,31 @@ fun TutorDashboardScreen(
         if (!permissionState.allPermissionsGranted) {
             permissionState.launchMultiplePermissionRequest()
         }
+    }
+
+    if (showAssessmentTypeDialog) {
+        AssessmentTypeDialog(
+            onDismiss = { showAssessmentTypeDialog = false },
+            onTypeSelected = { type ->
+                showAssessmentTypeDialog = false
+                if (type == QuestionType.MULTIPLE_CHOICE) {
+                    showCreateMcqAssessmentDialog = true
+                } else {
+                    showCreateAssessmentDialog = true
+                }
+            }
+        )
+    }
+
+    if (showCreateMcqAssessmentDialog && uiState.activeSession?.sessionId!= null) {
+        CreateMcqAssessmentDialog(
+            sessionId = uiState.activeSession!!.sessionId,
+            onDismiss = { showCreateMcqAssessmentDialog = false },
+            onSend = { assessmentBlueprint ->
+                viewModel.sendAssessment(assessmentBlueprint)
+                showCreateMcqAssessmentDialog = false
+            }
+        )
     }
 
     val isSessionActive = uiState.isAdvertising && uiState.activeClass != null
@@ -156,7 +184,7 @@ fun TutorDashboardScreen(
                     onRejectRequest = { endpointId -> viewModel.rejectStudent(endpointId) },
                     onAcceptAllRequests = { viewModel.acceptAll() },
                     onMarkAbsent = { studentId -> viewModel.markStudentAbsent(studentId) },
-                    onCreateAssessment = { showCreateAssessmentDialog = true },
+                    onCreateAssessment = { showAssessmentTypeDialog = true },
                     onNavigateToSubmission = onNavigateToSubmission,
                     hasPendingFeedback = hasPendingFeedback,
                     hasSubmissionsToGrade = hasSubmissionsToGrade,
@@ -527,22 +555,26 @@ fun StopSessionDialog(
         title = { Text("End Session?") },
         text = { Text(text) },
         confirmButton = {
-            Button(
-                onClick = onTakeAttendanceAndStop,
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Finalize Attendance & Stop")
-            }
-        },
-        dismissButton = {
-            Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onTakeAttendanceAndStop,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Finalize Attendance & Stop")
+                }
                 OutlinedButton(
                     onClick = onStopAnyway,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Stop Without Attendance")
                 }
                 TextButton(
                     onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Cancel")
                 }
@@ -878,6 +910,266 @@ fun EmptyState(icon: ImageVector, headline: String, subline: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AssessmentTypeDialog(
+    onDismiss: () -> Unit,
+    onTypeSelected: (QuestionType) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Quiz, contentDescription = "Choose Assessment Type") },
+        title = { Text("Choose Assessment Type") },
+        text = {
+            Column {
+                Text("Select the type of assessment you want to create.")
+                Spacer(Modifier.height(16.dp))
+                Card(
+                    onClick = { onTypeSelected(QuestionType.TEXT_INPUT) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.EditNote, contentDescription = null, modifier = Modifier.size(40.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text("Written Response", style = MaterialTheme.typography.titleMedium)
+                            Text("Students type or write answers.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Card(
+                    onClick = { onTypeSelected(QuestionType.MULTIPLE_CHOICE) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Checklist, contentDescription = null, modifier = Modifier.size(40.dp))
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text("Multiple Choice", style = MaterialTheme.typography.titleMedium)
+                            Text("Students select from a list of options.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateMcqAssessmentDialog(
+    sessionId: String,
+    onDismiss: () -> Unit,
+    onSend: (AssessmentBlueprint) -> Unit
+) {
+    var title by rememberSaveable { mutableStateOf("") }
+    var duration by rememberSaveable { mutableStateOf("10") }
+    val questions = remember { mutableStateListOf<AssessmentQuestion>() }
+
+    // Add a default first question
+    LaunchedEffect(Unit) {
+        if (questions.isEmpty()) {
+            questions.add(
+                AssessmentQuestion(
+                    text = "",
+                    type = QuestionType.MULTIPLE_CHOICE,
+                    markingGuide = "-1", // -1 indicates no correct option selected yet
+                    maxScore = 10,
+                    options = listOf("", "") // Start with two empty options
+                )
+            )
+        }
+    }
+
+    AlertDialog(
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.95f)
+            .fillMaxHeight(0.9f),
+        onDismissRequest = onDismiss,
+        title = { Text("Create Multiple Choice Quiz") },
+        text = {
+            Column(modifier = Modifier.fillMaxSize()) {
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Quiz Title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(value = duration, onValueChange = { duration = it.filter { c -> c.isDigit() } }, label = { Text("Duration (minutes)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    itemsIndexed(questions, key = { _, q -> q.id }) { index, question ->
+                        McqQuestionEditor(
+                            questionNumber = index + 1,
+                            question = question,
+                            onQuestionChange = { updatedQuestion ->
+                                questions[index] = updatedQuestion
+                            },
+                            onDelete = { questions.remove(question) }
+                        )
+                    }
+                    item {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp), horizontalArrangement = Arrangement.Center) {
+                            Button(onClick = {
+                                questions.add(
+                                    AssessmentQuestion(
+                                        text = "",
+                                        type = QuestionType.MULTIPLE_CHOICE,
+                                        markingGuide = "-1",
+                                        maxScore = 10,
+                                        options = listOf("", "")
+                                    )
+                                )
+                            }) {
+                                Icon(Icons.Rounded.Add, contentDescription = null)
+                                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                                Text("Add Another Question")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val blueprint = AssessmentBlueprint(
+                        sessionId = sessionId,
+                        title = title,
+                        durationInMinutes = duration.toIntOrNull()?: 10,
+                        questions = questions.toList()
+                    )
+                    onSend(blueprint)
+                },
+                enabled = title.isNotBlank() && duration.isNotBlank() && questions.isNotEmpty() &&
+                        questions.all {
+                            it.text.isNotBlank() &&
+                                    it.markingGuide.toInt() >= 0 &&
+                                    it.options?.all { opt -> opt.isNotBlank() }?: false
+                        }
+            ) { Text("Send to Class") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun McqQuestionEditor(
+    questionNumber: Int,
+    question: AssessmentQuestion,
+    onQuestionChange: (AssessmentQuestion) -> Unit,
+    onDelete: () -> Unit
+) {
+    var isDropdownExpanded by remember { mutableStateOf(false) }
+    val options = remember { mutableStateListOf<String>().also { it.addAll(question.options?: emptyList()) } }
+    val correctOptionIndex = question.markingGuide.toIntOrNull()?: -1
+
+    Card(
+        modifier = Modifier
+            .padding(vertical = 8.dp)
+            .fillMaxWidth(),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Question #$questionNumber", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDelete, enabled = questionNumber > 1) {
+                    Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete Question", tint = if (questionNumber > 1) MaterialTheme.colorScheme.error else Color.Gray)
+                }
+            }
+            OutlinedTextField(
+                value = question.text,
+                onValueChange = { onQuestionChange(question.copy(text = it)) },
+                label = { Text("Question Text") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+            Text("Answer Options", style = MaterialTheme.typography.titleSmall)
+
+            options.forEachIndexed { index, option ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = option,
+                        onValueChange = {
+                            options[index] = it
+                            onQuestionChange(question.copy(options = options.toList()))
+                        },
+                        label = { Text("Option ${('A' + index)}") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = {
+                        options.removeAt(index)
+                        // If the removed option was the correct one, reset the selection
+                        val newCorrectIndex = if (correctOptionIndex == index) -1 else if (correctOptionIndex > index) correctOptionIndex - 1 else correctOptionIndex
+                        onQuestionChange(question.copy(options = options.toList(), markingGuide = newCorrectIndex.toString()))
+                    }, enabled = options.size > 2) {
+                        Icon(Icons.Rounded.RemoveCircleOutline, contentDescription = "Remove Option")
+                    }
+                }
+            }
+
+            TextButton(onClick = {
+                options.add("")
+                onQuestionChange(question.copy(options = options.toList()))
+            }, modifier = Modifier.align(Alignment.End)) {
+                Text("Add Option")
+            }
+
+            HorizontalDivider()
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ExposedDropdownMenuBox(
+                    expanded = isDropdownExpanded,
+                    onExpandedChange = { isDropdownExpanded = it },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    OutlinedTextField(
+                        value = if (correctOptionIndex in options.indices) "Option ${('A' + correctOptionIndex)}: ${options[correctOptionIndex]}" else "Select Correct Answer",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Correct Answer") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isDropdownExpanded) },
+                        modifier = Modifier.menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = isDropdownExpanded,
+                        onDismissRequest = { isDropdownExpanded = false }
+                    ) {
+                        options.forEachIndexed { index, optionText ->
+                            if (optionText.isNotBlank()) {
+                                DropdownMenuItem(
+                                    text = { Text("Option ${('A' + index)}: $optionText") },
+                                    onClick = {
+                                        onQuestionChange(question.copy(markingGuide = index.toString()))
+                                        isDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = question.maxScore.toString(),
+                    onValueChange = { onQuestionChange(question.copy(maxScore = it.toIntOrNull()?: 0)) },
+                    label = { Text("Score") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.width(100.dp)
+                )
+            }
+        }
     }
 }
 

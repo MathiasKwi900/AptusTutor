@@ -13,6 +13,8 @@ import com.nexttechtitan.aptustutor.data.Assessment
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
+import com.nexttechtitan.aptustutor.data.FeedbackStatus
+import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +36,6 @@ data class SubmissionDetailsUiState(
     val submission: AssessmentSubmission? = null,
     val assessment: Assessment? = null,
     val draftAnswers: Map<String, AssessmentAnswer> = emptyMap(),
-    val savedQuestionIds: Set<String> = emptySet(),
     val feedbackSent: Boolean = false,
     val isGradingQuestionId: String? = null,
     val isGradingEntireSubmission: Boolean = false,
@@ -68,26 +69,23 @@ class SubmissionDetailsViewModel @Inject constructor(
         Log.d(TAG, "Initializing for submissionId: $submissionId")
         viewModelScope.launch {
             val initialSubmission = repository.getSubmissionFlow(submissionId).filterNotNull().first()
-            val hasFeedbackBeenSent = isEntireSubmissionGraded(initialSubmission)
+            val hasFeedbackBeenSent = initialSubmission.feedbackStatus == FeedbackStatus.DELIVERED ||
+                    initialSubmission.feedbackStatus == FeedbackStatus.SENT_PENDING_ACK
 
             _uiState.update {
                 it.copy(
                     submission = initialSubmission,
-                    draftAnswers = initialSubmission.answers?.associateBy { answer -> answer.questionId } ?: emptyMap(),
-                    savedQuestionIds = if (hasFeedbackBeenSent) initialSubmission.answers?.map { a -> a.questionId }?.toSet() ?: emptySet() else emptySet(),
+                    draftAnswers = initialSubmission.answers?.associateBy { answer -> answer.questionId }?: emptyMap(),
                     feedbackSent = hasFeedbackBeenSent
                 )
             }
         }
 
-        // 2. Continuously observe the submission from the DB to keep the base object in sync.
-        // This does NOT touch the draftAnswers, allowing the user's edits to persist in the UI.
         repository.getSubmissionFlow(submissionId)
             .filterNotNull()
             .onEach { dbSubmission -> _uiState.update { it.copy(submission = dbSubmission) } }
             .launchIn(viewModelScope)
 
-        // 3. Observe the associated assessment.
         repository.getAssessmentFlowBySubmission(submissionId)
             .onEach { assessment -> _uiState.update { it.copy(assessment = assessment) } }
             .launchIn(viewModelScope)
@@ -107,8 +105,7 @@ class SubmissionDetailsViewModel @Inject constructor(
             }
             // Any edit "unsaves" the question, requiring the tutor to save again.
             currentState.copy(
-                draftAnswers = newDrafts,
-                savedQuestionIds = currentState.savedQuestionIds - questionId
+                draftAnswers = newDrafts
             )
         }
     }
@@ -122,34 +119,11 @@ class SubmissionDetailsViewModel @Inject constructor(
             }
             // Any edit "unsaves" the question.
             currentState.copy(
-                draftAnswers = newDrafts,
-                savedQuestionIds = currentState.savedQuestionIds - questionId
+                draftAnswers = newDrafts
             )
         }
     }
 
-    // Persists the current draft for a single question to the local Room database.
-    fun saveGrade(questionId: String) {
-        viewModelScope.launch {
-            val answerToSave = _uiState.value.draftAnswers[questionId]
-            if (answerToSave?.score != null && !answerToSave.feedback.isNullOrBlank()) {
-                repository.saveManualGrade(
-                    submissionId = submissionId,
-                    questionId = questionId,
-                    score = answerToSave.score!!,
-                    feedback = answerToSave.feedback!!
-                )
-                _toastEvents.emit("Grade for Q#${getQuestionNumber(questionId)} saved")
-                _uiState.update {
-                    it.copy(savedQuestionIds = it.savedQuestionIds + questionId)
-                }
-            } else {
-                _toastEvents.emit("A score and feedback are required to save.")
-            }
-        }
-    }
-
-    // Sends the final, graded submission back to the student. This is a final action.
     fun sendFeedback() {
         viewModelScope.launch {
             _uiState.value.submission?.let { submission ->
@@ -253,6 +227,61 @@ class SubmissionDetailsViewModel @Inject constructor(
         }
 
         _uiState.update { it.copy(isGradingQuestionId = null) }
+    }
+
+    fun autoGradeMcqQuestions() {
+        viewModelScope.launch {
+            val assessment = _uiState.value.assessment?: return@launch
+            val submission = _uiState.value.submission?: return@launch
+
+            val mcqQuestions = assessment.questions.filter { it.type == QuestionType.MULTIPLE_CHOICE }
+            if (mcqQuestions.isEmpty()) {
+                _toastEvents.emit("No multiple choice questions found in this assessment.")
+                return@launch
+            }
+
+            _toastEvents.emit("Auto-grading ${mcqQuestions.size} questions...")
+
+            val newDrafts = _uiState.value.draftAnswers.toMutableMap()
+            var gradedCount = 0
+
+            mcqQuestions.forEach { question ->
+                val correctAnswerIndex = question.markingGuide.toIntOrNull()
+                val studentAnswer = submission.answers?.find { it.questionId == question.id }
+                val studentAnswerIndex = studentAnswer?.textResponse?.toIntOrNull()
+
+                if (correctAnswerIndex!= null && studentAnswer!= null) {
+                    val score = if (studentAnswerIndex == correctAnswerIndex) question.maxScore else 0
+                    val feedback = if (studentAnswerIndex == correctAnswerIndex) {
+                        "Correct."
+                    } else {
+                        val correctOptionText = question.options?.getOrNull(correctAnswerIndex)?: "N/A"
+                        "Incorrect. The correct answer was ${('A' + correctAnswerIndex)}: $correctOptionText"
+                    }
+
+                    newDrafts[question.id] = studentAnswer.copy(score = score, feedback = feedback)
+                    gradedCount++
+                }
+            }
+
+            _uiState.update {
+                it.copy(
+                    draftAnswers = newDrafts
+                )
+            }
+            _toastEvents.emit("Auto-grading complete for $gradedCount questions.")
+        }
+    }
+
+    fun saveAllDrafts() {
+        viewModelScope.launch {
+            val submission = _uiState.value.submission?: return@launch
+            val draftAnswers = _uiState.value.draftAnswers
+
+            val submissionWithDrafts = submission.copy(answers = draftAnswers.values.toList())
+            repository.saveSubmissionDraft(submissionWithDrafts)
+            _toastEvents.emit("Draft saved successfully.")
+        }
     }
 
     private fun buildPrompt(question: AssessmentQuestion, answer: AssessmentAnswer?): String {
