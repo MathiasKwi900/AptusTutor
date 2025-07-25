@@ -62,12 +62,14 @@ data class AssessmentQuestion(
     val type: QuestionType,
     val markingGuide: String,
     var questionImagePath: String? = null,
-    val maxScore: Int = 10
+    val maxScore: Int = 10,
+    val options: List<String>? = null
 )
 
 enum class QuestionType {
     TEXT_INPUT,
-    HANDWRITTEN_IMAGE
+    HANDWRITTEN_IMAGE,
+    MULTIPLE_CHOICE
 }
 
 enum class FeedbackStatus {

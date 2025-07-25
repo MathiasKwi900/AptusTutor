@@ -14,6 +14,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Warning
@@ -36,6 +41,7 @@ import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.ModelStatus
+import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -58,6 +64,10 @@ fun SubmissionDetailsScreen(
 
     val isAiReadyForGrading by remember {
         derivedStateOf { modelState is GemmaAiService.ModelState.ModelReadyCold || modelState is GemmaAiService.ModelState.Ready }
+    }
+
+    val containsMcq by remember(assessment) {
+        derivedStateOf { assessment?.questions?.any { it.type == QuestionType.MULTIPLE_CHOICE }?: false }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -107,9 +117,13 @@ fun SubmissionDetailsScreen(
                         )
                     }
 
-                    Log.d("AptusTutorDebug", "isAiReadyForGrading: $isAiReadyForGrading and modelInitialized: $modelInitialized")
-                    FilledTonalButton(
-                        onClick = {
+                    SubmissionActionsMenu(
+                        containsMcq = containsMcq,
+                        isAiReady = isAiReadyForGrading && modelInitialized,
+                        isAiBusy = uiState.isGradingEntireSubmission,
+                        isFeedbackSent = uiState.feedbackSent,
+                        onAutoGradeMcq = { viewModel.autoGradeMcqQuestions() },
+                        onGradeWithAi = {
                             if (isAiReadyForGrading && modelInitialized) {
                                 viewModel.gradeEntireSubmission()
                             } else {
@@ -124,40 +138,35 @@ fun SubmissionDetailsScreen(
                                     }
                                 }
                             }
-                        },
-                        enabled = modelState !is GemmaAiService.ModelState.Failed &&
-                                modelState !is GemmaAiService.ModelState.LoadingModel &&
-                                modelState !is GemmaAiService.ModelState.WarmingUp &&
-                                modelState !is GemmaAiService.ModelState.Busy &&
-                                !uiState.isGradingEntireSubmission &&
-                                !uiState.feedbackSent,
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        if (modelState is GemmaAiService.ModelState.Failed) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = "AI Error")
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("AI Error")
-                        } else {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = "Grade All with AI")
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("Grade All")
                         }
-                    }
+                    )
                 }
             )
         },
         bottomBar = {
             BottomAppBar(
-                contentPadding = PaddingValues(16.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Button(
-                    onClick = { showSendConfirmationDialog = true },
-                    enabled = isGradingComplete && !uiState.feedbackSent,
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
-                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text(if (uiState.feedbackSent) "Feedback Sent" else "Send Graded Feedback")
+                    OutlinedButton(
+                        onClick = { viewModel.saveAllDrafts() },
+                        modifier = Modifier.weight(1f),
+                        enabled =!uiState.feedbackSent
+                    ) {
+                        Text("Save Draft")
+                    }
+                    Button(
+                        onClick = { showSendConfirmationDialog = true },
+                        enabled = isGradingComplete &&!uiState.feedbackSent,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text(if (uiState.feedbackSent) "Sent" else "Send Feedback")
+                    }
                 }
             }
         }
@@ -185,15 +194,11 @@ fun SubmissionDetailsScreen(
                     )
                 }
                 itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
-                    val isSaved = uiState.savedQuestionIds.contains(question.id)
-                    val isAiGradingThisQuestion = uiState.isGradingQuestionId == question.id
                     GradedAnswerCard(
                         questionIndex = index + 1,
                         question = question,
                         answer = draftAnswers[question.id],
-                        isSaved = isSaved,
                         isFeedbackSent = uiState.feedbackSent,
-                        isAiGrading = isAiGradingThisQuestion,
                         onScoreChange = { newScore ->
                             viewModel.onScoreChange(
                                 question.id,
@@ -206,9 +211,7 @@ fun SubmissionDetailsScreen(
                                 question.id,
                                 newFeedback
                             )
-                        },
-                        onSaveGrade = { viewModel.saveGrade(question.id) },
-                        onGradeWithAi = { /* This button is commented out for now */ }
+                        }
                     )
                 }
             }
@@ -241,6 +244,46 @@ fun SubmissionDetailsScreen(
                 viewModel.sendFeedback()
             }
         )
+    }
+}
+
+@Composable
+fun SubmissionActionsMenu(
+    containsMcq: Boolean,
+    isAiReady: Boolean,
+    isAiBusy: Boolean,
+    isFeedbackSent: Boolean,
+    onAutoGradeMcq: () -> Unit,
+    onGradeWithAi: () -> Unit,
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Box {
+        IconButton(onClick = { showMenu = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More Actions")
+        }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            if (containsMcq) {
+                DropdownMenuItem(
+                    text = { Text("Auto-Grade MCQs") },
+                    onClick = {
+                        onAutoGradeMcq()
+                        showMenu = false
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.Checklist, contentDescription = null) },
+                    enabled =!isFeedbackSent
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Grade All with AI") },
+                onClick = {
+                    onGradeWithAi()
+                    showMenu = false
+                },
+                leadingIcon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+                enabled = isAiReady &&!isAiBusy &&!isFeedbackSent
+            )
+        }
     }
 }
 
@@ -291,16 +334,12 @@ fun GradedAnswerCard(
     questionIndex: Int,
     question: AssessmentQuestion,
     answer: AssessmentAnswer?,
-    isSaved: Boolean,
-    isAiGrading: Boolean,
     isFeedbackSent: Boolean,
     onScoreChange: (String) -> Unit,
-    onFeedbackChange: (String) -> Unit,
-    onSaveGrade: () -> Unit,
-    onGradeWithAi: () -> Unit
+    onFeedbackChange: (String) -> Unit
 ) {
-    val isSavable = answer?.score != null && !answer.feedback.orEmpty().isNotBlank()
-    val isReadOnly = (isSaved || isFeedbackSent)
+    val isGraded = answer?.score!= null &&!answer.feedback.orEmpty().isBlank()
+    val isReadOnly = isFeedbackSent
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -309,7 +348,16 @@ fun GradedAnswerCard(
         ) {
             // --- 1. Question & Guide Section ---
             Column {
-                Text("Question $questionIndex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isGraded) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = "Graded",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text("Question $questionIndex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(question.text, style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.height(12.dp))
@@ -370,68 +418,26 @@ fun GradedAnswerCard(
             Column {
                 Text("Grading Panel", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = answer?.score?.toString() ?: "",
-                        onValueChange = onScoreChange,
-                        label = { Text("Score") },
-                        suffix = { Text("/ ${question.maxScore}") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        readOnly = isReadOnly,
-                        modifier = Modifier.width(120.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    OutlinedTextField(
-                        value = answer?.feedback ?: "",
-                        onValueChange = onFeedbackChange,
-                        label = { Text("Feedback / Correction") },
-                        readOnly = isReadOnly,
-                        modifier = Modifier
-                            .weight(1f)
-                            .defaultMinSize(minHeight = 100.dp)
-                    )
-                }
+                OutlinedTextField(
+                    value = answer?.feedback ?: "",
+                    onValueChange = onFeedbackChange,
+                    label = { Text("Feedback / Correction") },
+                    readOnly = isReadOnly,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    /*
-                    // V2 FEATURE: Per-question grading will be enabled when needed.
-                    // For now, we use the main "Grade All" button.
-                    FilledTonalButton(
-                        onClick = onGradeWithAi,
-                        enabled = !isFeedbackSent && !isAiGrading
-                    ) {
-                        if (isAiGrading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(ButtonDefaults.IconSize),
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("Grading...")
-                        } else {
-                            Icon(Icons.Rounded.Lightbulb, contentDescription = "Grade with AI")
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("Grade with AI")
-                        }
-                    }
-                     */
-                    Spacer(Modifier.width(8.dp))
-                    Button(
-                        onClick = onSaveGrade,
-                        enabled = isSavable && !isSaved && !isFeedbackSent
-                    ) {
-                        Text(if (isSaved) "Saved" else "Save")
-                    }
-                }
+                OutlinedTextField(
+                    value = answer?.score?.toString() ?: "",
+                    onValueChange = onScoreChange,
+                    label = { Text("Score") },
+                    suffix = { Text("/ ${question.maxScore}") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    readOnly = isReadOnly,
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .align(Alignment.End)
+                )
             }
         }
     }

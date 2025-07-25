@@ -153,4 +153,13 @@ class Converters {
         val listType = object : TypeToken<List<AssessmentAnswer>?>() {}.type
         return Gson().fromJson(value, listType)
     }
+
+    @TypeConverter
+    fun fromOptionList(value: List<String>?): String = Gson().toJson(value)
+
+    @TypeConverter
+    fun toOptionList(value: String): List<String>? {
+        val listType = object : TypeToken<List<String>?>() {}.type
+        return Gson().fromJson(value, listType)
+    }
 }
