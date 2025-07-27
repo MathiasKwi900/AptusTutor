@@ -145,7 +145,6 @@ class AiSettingsViewModel @Inject constructor(
             }
             // Reset preferences and release the model from memory
             userPreferencesRepo.setAiModel(ModelStatus.NOT_DOWNLOADED)
-            gemmaAiService.releaseModels()
             _toastEvents.emit("Model removed from app storage.")
         }
     }

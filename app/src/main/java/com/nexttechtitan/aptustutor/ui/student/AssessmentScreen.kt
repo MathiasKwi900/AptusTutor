@@ -2,6 +2,7 @@ package com.nexttechtitan.aptustutor.ui.student
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -200,7 +202,19 @@ fun QuestionCard(
         }
     }
 
-    val cameraPermissionState = rememberPermissionState(permission = Manifest.permission.CAMERA)
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            tempImageUriHolder?.let { uri ->
+                cameraLauncher.launch(uri)
+            }
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("Camera permission is required to attach an image.")
+            }
+        }
+    }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column {
@@ -266,12 +280,15 @@ fun QuestionCard(
                 ImageAnswerInput(
                     capturedImageUri = viewModel.imageAnswers[question.id],
                     onLaunchCamera = {
-                        if (cameraPermissionState.status.isGranted) {
+                        val permission = Manifest.permission.CAMERA
+                        if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
                             val uri = ComposeFileProvider.getImageUri(context)
                             tempImageUriHolder = uri
                             cameraLauncher.launch(uri)
                         } else {
-                            cameraPermissionState.launchPermissionRequest()
+                            val uri = ComposeFileProvider.getImageUri(context)
+                            tempImageUriHolder = uri
+                            permissionLauncher.launch(permission)
                         }
                     }
                 )

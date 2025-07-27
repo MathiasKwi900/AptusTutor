@@ -13,6 +13,7 @@ import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.RepositoryEvent
 import com.nexttechtitan.aptustutor.data.SessionHistoryItem
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
+import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -47,7 +48,7 @@ class StudentDashboardViewModel @Inject constructor(
     private val _events = MutableSharedFlow<String>()
     val events = _events.asSharedFlow()
 
-    private val _navigationEvents = MutableSharedFlow<Unit>()
+    private val _navigationEvents = MutableSharedFlow<String>()
     val navigationEvents = _navigationEvents.asSharedFlow()
 
     val textAnswers = mutableStateMapOf<String, String>()
@@ -182,7 +183,13 @@ class StudentDashboardViewModel @Inject constructor(
             val currentRole = userPreferencesRepository.userRoleFlow.first()
             val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
             repository.switchUserRole(newRole)
-            _navigationEvents.emit(Unit)
+
+            val destination = if (newRole == "TUTOR") {
+                AptusTutorScreen.TutorDashboard.name
+            } else {
+                AptusTutorScreen.StudentDashboard.name
+            }
+            _navigationEvents.emit(destination)
         }
     }
 

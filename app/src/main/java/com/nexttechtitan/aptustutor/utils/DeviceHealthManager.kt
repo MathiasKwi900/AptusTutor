@@ -8,14 +8,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 enum class DeviceCapability {
-    UNSUPPORTED, // Cannot run the model safely
-    LIMITED,     // Can run a single inference task
-    CAPABLE      // Can run batch inference tasks
+    UNSUPPORTED,
+    LIMITED,
+    CAPABLE
 }
 
+// MODIFIED: Added raw metric fields for accurate UI display.
 data class CapabilityResult(
     val capability: DeviceCapability,
-    val message: String
+    val message: String,
+    val availableRamMb: Long,
+    val thermalHeadroom: Float? // Can be null if API returns NaN
 )
 
 @Singleton
@@ -23,12 +26,14 @@ class DeviceHealthManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val thermalManager: ThermalManager
 ) {
-    private val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    private val activityManager by lazy {
+        context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    }
 
     companion object {
-        private const val MIN_SUPPORTED_TOTAL_RAM_MB = 1500L // 1.5 GB
-        private const val MIN_CAPABLE_AVAILABLE_RAM_MB = 750L // 750 MB
-        private const val MIN_LIMITED_AVAILABLE_RAM_MB = 400L // 400 MB
+        private const val MIN_SUPPORTED_TOTAL_RAM_MB = 1500L
+        private const val MIN_CAPABLE_AVAILABLE_RAM_MB = 750L
+        private const val MIN_LIMITED_AVAILABLE_RAM_MB = 400L
     }
 
     fun checkDeviceCapability(): CapabilityResult {
@@ -36,38 +41,49 @@ class DeviceHealthManager @Inject constructor(
         activityManager.getMemoryInfo(memoryInfo)
         val totalRamMb = memoryInfo.totalMem / 1048576L
         val availableRamMb = memoryInfo.availMem / 1048576L
+        val thermalHeadroom = thermalManager.getThermalHeadroom()
 
         if (totalRamMb < MIN_SUPPORTED_TOTAL_RAM_MB) {
             return CapabilityResult(
                 DeviceCapability.UNSUPPORTED,
-                "Device Unsupported: This device has less than 1.5GB of total RAM ($totalRamMb MB), which is insufficient to run the AI model reliably."
+                "Device Unsupported: Less than 1.5GB of total RAM.",
+                availableRamMb,
+                thermalHeadroom
             )
         }
 
         if (!thermalManager.isSafeToProceed()) {
             return CapabilityResult(
                 DeviceCapability.UNSUPPORTED,
-                "Device Overheating: The device is currently under thermal stress. Please allow it to cool down before running AI tasks."
+                "Device Overheating: AI tasks paused to allow cooling.",
+                availableRamMb,
+                thermalHeadroom
             )
         }
 
         if (availableRamMb < MIN_LIMITED_AVAILABLE_RAM_MB) {
             return CapabilityResult(
                 DeviceCapability.UNSUPPORTED,
-                "Insufficient Memory: The device has very low available memory ($availableRamMb MB). Please close other applications and try again."
+                "Insufficient Memory: Only $availableRamMb MB RAM available.",
+                availableRamMb,
+                thermalHeadroom
             )
         }
 
         if (availableRamMb < MIN_CAPABLE_AVAILABLE_RAM_MB) {
             return CapabilityResult(
                 DeviceCapability.LIMITED,
-                "Limited Memory Mode: Available RAM ($availableRamMb MB) is low. The app will grade one question at a time to ensure stability."
+                "Limited Memory Mode: Grading one by one for stability.",
+                availableRamMb,
+                thermalHeadroom
             )
         }
 
         return CapabilityResult(
             DeviceCapability.CAPABLE,
-            "Device Ready: Sufficient resources detected ($availableRamMb MB RAM available). Ready for batch grading."
+            "Device Ready: Sufficient resources detected.",
+            availableRamMb,
+            thermalHeadroom
         )
     }
 }

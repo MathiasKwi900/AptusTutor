@@ -39,8 +39,8 @@ data class TutorDashboardUiState(
     val activeClass: ClassWithStudents? = null,
     val connectionRequests: List<ConnectionRequest> = emptyList(),
     val connectedStudents: List<ConnectedStudent> = emptyList(),
-    val isAssessmentActive: Boolean = false,
-    val activeAssessment: Assessment? = null,
+    val sentAssessments: List<Assessment> = emptyList(),
+    val viewingAssessmentId: String? = null,
     val assessmentSubmissions: Map<String, AssessmentSubmission> = emptyMap(),
     val error: String? = null
 )

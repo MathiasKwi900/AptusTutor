@@ -120,7 +120,8 @@ data class Assessment(
     val sessionId: String,
     val title: String,
     val questions: List<AssessmentQuestion>,
-    val durationInMinutes: Int
+    val durationInMinutes: Int,
+    val sentTimestamp: Long
 )
 
 @Entity(tableName = "assessment_submissions")
