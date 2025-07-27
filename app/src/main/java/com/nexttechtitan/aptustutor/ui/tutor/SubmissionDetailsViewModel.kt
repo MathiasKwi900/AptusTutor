@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nexttechtitan.aptustutor.ai.AiGradeResponse
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.ThermalManager
 import com.nexttechtitan.aptustutor.data.AptusTutorRepository
@@ -14,13 +15,19 @@ import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.AssessmentSubmission
 import com.nexttechtitan.aptustutor.data.FeedbackStatus
+import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
+import com.nexttechtitan.aptustutor.di.AiDispatcher
+import com.nexttechtitan.aptustutor.utils.DeviceCapability
+import com.nexttechtitan.aptustutor.utils.DeviceHealthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +35,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -47,7 +55,8 @@ class SubmissionDetailsViewModel @Inject constructor(
     private val userPreferencesRepo: UserPreferencesRepository,
     private val repository: AptusTutorRepository,
     private val gemmaAiService: GemmaAiService,
-    private val thermalManager: ThermalManager,
+    private val deviceHealthManager: DeviceHealthManager,
+    @AiDispatcher private val aiDispatcher: CoroutineDispatcher,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val submissionId: String = savedStateHandle.get("submissionId")!!
@@ -62,8 +71,10 @@ class SubmissionDetailsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SubmissionDetailsUiState())
     val uiState: StateFlow<SubmissionDetailsUiState> = _uiState.asStateFlow()
 
+    val modelStatus = userPreferencesRepo.aiModelStatusFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ModelStatus.NOT_DOWNLOADED)
+
     val modelState = gemmaAiService.modelState
-    val modelInitialized = userPreferencesRepo.aiModelInitializedFlow
 
     init {
         Log.d(TAG, "Initializing for submissionId: $submissionId")
@@ -148,11 +159,11 @@ class SubmissionDetailsViewModel @Inject constructor(
     }
 
     fun gradeEntireSubmission() {
-        viewModelScope.launch(Dispatchers.Default) {
+        viewModelScope.launch(aiDispatcher) {
             Log.d(TAG, "gradeEntireSubmission called.")
-            if (gemmaAiService.modelState.value !is GemmaAiService.ModelState.Ready &&
-                gemmaAiService.modelState.value !is GemmaAiService.ModelState.ModelReadyCold) {
-                _toastEvents.emit("AI is not ready yet. Still preparing in the background.")
+            val initialCheck = deviceHealthManager.checkDeviceCapability()
+            if (initialCheck.capability == DeviceCapability.UNSUPPORTED) {
+                _toastEvents.emit("AI Grading Halted: ${initialCheck.message}")
                 return@launch
             }
             if (uiState.value.isGradingEntireSubmission || uiState.value.isGradingQuestionId != null) {
@@ -173,10 +184,11 @@ class SubmissionDetailsViewModel @Inject constructor(
             _toastEvents.emit("Starting full submission AI grading...")
 
             for ((index, question) in questionsToGrade.withIndex()) {
-                while (!thermalManager.isSafeToProceed()) {
-                    Log.w(TAG, "Device is overheating. Pausing grading for 15 seconds.")
-                    _uiState.update { it.copy(gradingProgressText = "Device is hot. Cooling down...") }
-                    kotlinx.coroutines.delay(15000)
+                val loopCheck = deviceHealthManager.checkDeviceCapability()
+                if (loopCheck.capability == DeviceCapability.UNSUPPORTED) {
+                    _toastEvents.emit("Grading paused due to device health: ${loopCheck.message}")
+                    _uiState.update { it.copy(isGradingEntireSubmission = false, gradingProgressText = "Paused") }
+                    return@launch
                 }
 
                 val progressText = "Grading Question ${index + 1} of ${questionsToGrade.size}..."
@@ -201,10 +213,17 @@ class SubmissionDetailsViewModel @Inject constructor(
         _uiState.update { it.copy(isGradingQuestionId = question.id) }
         Log.d(TAG, "gradeSingleQuestionInternal started for Q-ID: ${question.id}")
 
-        val prompt = buildPrompt(question, answer)
         val imageBitmap: Bitmap? = answer?.imageFilePath?.let { BitmapFactory.decodeFile(it) }
 
-        val result = gemmaAiService.grade(prompt, imageBitmap)
+        if (answer?.textResponse.isNullOrBlank() && imageBitmap == null) {
+            Log.i(TAG, "Programmatically grading blank answer for Q-ID: ${question.id}")
+            val blankResult = AiGradeResponse(0, "No answer provided.")
+            updateDraftsWithResult(question, blankResult)
+            _uiState.update { it.copy(isGradingQuestionId = null) }
+            return
+        }
+
+        val result = gemmaAiService.grade(question, answer, imageBitmap)
 
         result.onSuccess { response ->
             Log.i(TAG, "Successfully graded Q-ID: ${question.id}. Score: ${response.score}")
@@ -227,6 +246,22 @@ class SubmissionDetailsViewModel @Inject constructor(
         }
 
         _uiState.update { it.copy(isGradingQuestionId = null) }
+    }
+
+    private fun updateDraftsWithResult(question: AssessmentQuestion, response: AiGradeResponse) {
+        val clampedScore = response.score?.coerceIn(0, question.maxScore)
+        if (clampedScore!= response.score) {
+            Log.w(TAG, "AI returned score (${response.score}) outside range. Clamped to $clampedScore.")
+        }
+        _uiState.update { currentState ->
+            val newDrafts = currentState.draftAnswers.toMutableMap()
+            val existingAnswer = newDrafts[question.id]?: AssessmentAnswer(questionId = question.id)
+            newDrafts[question.id] = existingAnswer.copy(
+                score = clampedScore,
+                feedback = response.feedback
+            )
+            currentState.copy(draftAnswers = newDrafts)
+        }
     }
 
     fun autoGradeMcqQuestions() {
@@ -282,45 +317,5 @@ class SubmissionDetailsViewModel @Inject constructor(
             repository.saveSubmissionDraft(submissionWithDrafts)
             _toastEvents.emit("Draft saved successfully.")
         }
-    }
-
-    private fun buildPrompt(question: AssessmentQuestion, answer: AssessmentAnswer?): String {
-        val studentAnswerText: String
-        val answerInstruction: String
-
-        if (answer == null || (answer.textResponse.isNullOrBlank() && answer.imageFilePath.isNullOrBlank())) {
-            studentAnswerText = ""
-            answerInstruction = "The student did not provide an answer. Your task is to assign a score\n" +
-                    "of 0 and use the feedback field to politely provide the correct answer from the MARKING GUIDE."
-        } else {
-            studentAnswerText = when {
-                !answer.textResponse.isNullOrBlank() &&!answer.imageFilePath.isNullOrBlank() -> """
-                Typed Answer: "${answer.textResponse}"
-                (An image was also provided for context).
-                """.trimIndent()
-                !answer.textResponse.isNullOrBlank() -> "Typed Answer: \"${answer.textResponse}\""
-                else -> "An image of a handwritten answer was provided."
-            }
-            answerInstruction = "Analyze the student's answer for conceptual understanding; it does\n" +
-                    "not need to be a perfect word-for-word match. Use your general knowledge on the topic to determine\n" +
-                    "how close their response is to the correct answer's intent. Then, provide specific, comparative\n" +
-                    "feedback. The final score MUST be an integer between 0 and ${question.maxScore}, inclusive."
-        }
-
-        return """
-        ROLE: Expert Teaching Assistant.
-        TASK: Grade the student's answer.
-        QUESTION: "${question.text}"
-        MARKING GUIDE: "${question.markingGuide}"
-        MAX SCORE: ${question.maxScore}
-        STUDENT ANSWER: $studentAnswerText
-        INSTRUCTIONS: $answerInstruction
-
-        OUTPUT FORMAT: Respond ONLY with a valid JSON object. Do not add any other text.
-        {
-          "score": <integer score>,
-          "feedback": "<concise feedback, under 30 words>"
-        }
-    """.trimIndent()
     }
 }

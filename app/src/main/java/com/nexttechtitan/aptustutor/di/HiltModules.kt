@@ -22,7 +22,15 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executors
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+@Retention(AnnotationRetention.BINARY)
+@Qualifier
+annotation class AiDispatcher
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -83,5 +91,14 @@ object AppModule {
     @Singleton
     fun provideFirebaseStorage(): FirebaseStorage {
         return FirebaseStorage.getInstance()
+    }
+
+    @Provides
+    @Singleton
+    @AiDispatcher
+    fun provideAiDispatcher(): CoroutineDispatcher {
+        // Creates a dispatcher that uses a single, dedicated background thread.
+        // All tasks sent to this dispatcher will run sequentially, in order.
+        return Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     }
 }

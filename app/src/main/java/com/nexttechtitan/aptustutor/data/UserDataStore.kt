@@ -32,7 +32,6 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
         val ONBOARDING_COMPLETE_KEY = stringPreferencesKey("onboarding_complete")
         val AI_MODEL_STATUS_KEY = stringPreferencesKey("ai_model_status")
         val AI_MODEL_PATH_KEY = stringPreferencesKey("ai_model_path")
-        val AI_MODEL_INITIALIZED_KEY = booleanPreferencesKey("ai_model_initialized")
     }
 
     val userRoleFlow: Flow<String?> = context.dataStore.data.map { it[USER_ROLE_KEY] }
@@ -45,15 +44,7 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
     val aiModelPathFlow: Flow<String?> = context.dataStore.data.map { preferences ->
         preferences[AI_MODEL_PATH_KEY]
     }
-    val aiModelInitializedFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
-        preferences[AI_MODEL_INITIALIZED_KEY] ?: false
-    }
 
-    suspend fun setAiModelInitialized(isInitialized: Boolean) {
-        context.dataStore.edit { preferences ->
-            preferences[AI_MODEL_INITIALIZED_KEY] = isInitialized
-        }
-    }
     suspend fun setAiModel(status: ModelStatus, path: String? = null) {
         context.dataStore.edit { preferences ->
             preferences[AI_MODEL_STATUS_KEY] = status.name
@@ -61,9 +52,6 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
                 preferences[AI_MODEL_PATH_KEY] = path
             } else {
                 preferences.remove(AI_MODEL_PATH_KEY)
-            }
-            if (status!= ModelStatus.DOWNLOADED) {
-                preferences.remove(AI_MODEL_INITIALIZED_KEY)
             }
         }
     }

@@ -94,6 +94,14 @@ fun TutorDashboardScreen(
         }
     }
 
+    LaunchedEffect(key1 = Unit) {
+        viewModel.navigationEvents.collect {
+            navController.navigate(AptusTutorScreen.Splash.name) {
+                popUpTo(0) { inclusive = true }
+            }
+        }
+    }
+
     val requiredPermissions = remember {
         when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
@@ -302,7 +310,7 @@ fun ActiveSessionScreen(
     hasSubmissionsToGrade: Boolean,
     onSendAllPending: () -> Unit
 ) {
-    var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
+    var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
     val tabs = listOf("Live Roster", "Assessment")
     val submissionCount = submissions.size
 
@@ -844,11 +852,11 @@ fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
     }
     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
         DropdownMenuItem(
-            text = { Text("Test AI Grading") },
-            leadingIcon = { Icon(Icons.Rounded.Science, null) },
+            text = { Text("Aptus Hub") },
+            leadingIcon = { Icon(Icons.Rounded.Hub, null) },
             onClick = {
                 showMenu = false
-                navController.navigate(AptusTutorScreen.AiTestScreen.name)
+                navController.navigate(AptusTutorScreen.AptusHubScreen.name)
             }
         )
         DropdownMenuItem(
@@ -877,10 +885,6 @@ fun SettingsMenu(onSwitchRole: () -> Unit, navController: NavHostController) {
             confirmButton = {
                 Button(onClick = {
                     onSwitchRole()
-                    // Navigate to splash to re-evaluate the start destination
-                    navController.navigate(AptusTutorScreen.Splash.name) {
-                        popUpTo(0) { inclusive = true }
-                    }
                 }) { Text("Confirm") }
             },
             dismissButton = { TextButton(onClick = { showDialog = false }) { Text("Cancel") } }

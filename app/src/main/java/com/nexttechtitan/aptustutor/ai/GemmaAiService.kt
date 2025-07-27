@@ -9,21 +9,22 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
+import com.nexttechtitan.aptustutor.data.AssessmentAnswer
+import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import com.nexttechtitan.aptustutor.utils.JsonExtractionUtils
 import com.nexttechtitan.aptustutor.utils.MemoryLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
-import androidx.core.graphics.createBitmap
 
 data class AiGradeResponse(val score: Int?, val feedback: String?)
 
@@ -34,167 +35,245 @@ class GemmaAiService @Inject constructor(
     private val memoryLogger: MemoryLogger,
     private val userPreferencesRepo: UserPreferencesRepository,
 ) {
-    private var llmInference: LlmInference? = null
-    private var activeSession: LlmInferenceSession? = null
-    private var isVisionSession: Boolean = false
-
     private val TAG = "AptusTutorDebug"
     private val inferenceMutex = Mutex()
-    private val WARM_UP_PROMPT = "You are a system component. Respond ONLY with the following valid JSON object: {\"score\": 1, \"feedback\": \"OK\"}"
+
+    /**
+     * This is the core of the new architecture. We maintain a map of dedicated, pre-warmed
+     * LlmInference engines. Each question gets its own engine to ensure 100% context isolation.
+     * The key is the unique questionId, and the value is the heavy LlmInference engine instance.
+     */
+    private val warmedTextEngines = mutableMapOf<String, LlmInference>()
+    private val warmedVisionEngines = mutableMapOf<String, LlmInference>()
 
     sealed class ModelState {
         object Uninitialized : ModelState()
         object LoadingModel : ModelState()
-        object ModelReadyCold : ModelState() // Model loaded but not warmed up
-        data class WarmingUp(val step: String) : ModelState() // e.g., "Text Engine (1/2)"
-        object Ready : ModelState() // Fully warmed up and ready for fast inference
-        object Busy : ModelState() // Actively grading
+        object Busy : ModelState()
+        object Ready : ModelState()
         data class Failed(val error: Throwable) : ModelState()
     }
 
     private val _modelState = MutableStateFlow<ModelState>(ModelState.Uninitialized)
     val modelState: StateFlow<ModelState> = _modelState.asStateFlow()
 
-    suspend fun initializeAndWarmUp() = withContext(Dispatchers.IO) {
-        inferenceMutex.withLock {
-            val isAlreadyInitialized = userPreferencesRepo.aiModelInitializedFlow.first()
-            if (isAlreadyInitialized) {
-                if (llmInference == null) {
-                    loadModelGraphInternal()
-                }
-                if (_modelState.value!is ModelState.Failed) {
-                    _modelState.value = ModelState.ModelReadyCold
-                }
-                Log.d(TAG, "Model has been previously initialized. Now loaded and ready.")
-                return@withLock
-            }
-
-            try {
-                Log.i(TAG, "Starting ONE-TIME model initialization and warm-up.")
-                // Step 1: Load the model if it's not already loaded.
-                if (llmInference == null) {
-                    loadModelGraphInternal() // This will set state to LoadingModel -> ModelReadyCold
-                }
-
-                // Ensure we are in the correct state to proceed
-                if (_modelState.value!is ModelState.ModelReadyCold) {
-                    throw IllegalStateException("Model is not in a ready state for warm-up.")
-                }
-
-                // Step 2: Warm up the text modality
-                _modelState.value = ModelState.WarmingUp("Text Engine (1/2)...")
-                Log.d(TAG, "Warming up text modality...")
-                val textResult = gradeInternal(WARM_UP_PROMPT, null)
-                textResult.onFailure { throw it }
-                Log.d(TAG, "Text modality warmed up successfully.")
-
-                // Step 3: Warm up the vision modality
-                _modelState.value = ModelState.WarmingUp("Vision Engine (2/2)...")
-                Log.d(TAG, "Warming up vision modality...")
-                val dummyBitmap = createBitmap(1, 1)
-                val visionResult = gradeInternal(WARM_UP_PROMPT, dummyBitmap)
-                dummyBitmap.recycle()
-                visionResult.onFailure { throw it }
-                Log.d(TAG, "Vision modality warmed up successfully.")
-
-                // Step 4: Finalize
-                userPreferencesRepo.setAiModelInitialized(true)
-                _modelState.value = ModelState.Ready
-                Log.i(TAG, "AI Engine successfully initialized and warmed up.")
-
-            } catch (e: Exception) {
-                _modelState.value = ModelState.Failed(e)
-                Log.e(TAG, "Failed to initialize and warm up AI Engine", e)
-                releaseModel() // Clean up on failure
-            }
-        }
-    }
-
-    suspend fun grade(prompt: String, image: Bitmap? = null): Result<AiGradeResponse> {
+    /**
+     * The primary public method for grading. It accepts structured data, which is a robust
+     * API contract. The ViewModel should be updated to call this method.
+     */
+    suspend fun grade(
+        question: AssessmentQuestion,
+        answer: AssessmentAnswer?,
+        image: Bitmap? = null
+    ): Result<AiGradeResponse> {
         return inferenceMutex.withLock {
-            if (!(_modelState.value is ModelState.Ready || _modelState.value is ModelState.ModelReadyCold)) {
-                Log.e(TAG, "Cannot grade, model is not in a ready state. Current state: ${_modelState.value}")
-                return@withLock Result.failure(IllegalStateException("Model is not ready for inference."))
-            }
             _modelState.value = ModelState.Busy
-            val result = gradeInternal(prompt, image)
+
+            // Step 1: Build the static prefix and dynamic suffix from the structured data.
+            val (prefixPrompt, suffixPrompt) = buildPrompts(question, answer)
+            val questionId = question.id
+            val isVision = image!= null
+
+            // Step 2: Get a dedicated engine for this specific question.
+            // If one doesn't exist, this method will create and warm a new one.
+            val engineResult = getOrCreateWarmedEngine(questionId, prefixPrompt, isVision)
+
+            if (engineResult.isFailure) {
+                // If engine creation/warming fails, the task fails, but the service is ready for another try.
+                _modelState.value = ModelState.Ready
+                return@withLock Result.failure(engineResult.exceptionOrNull()!!)
+            }
+            val engine = engineResult.getOrNull()!!
+
+            // Step 3: Perform the fast inference using the pre-warmed engine and the student's answer (suffix).
+            val result = gradeInternalSuffix(engine, suffixPrompt, image)
             _modelState.value = ModelState.Ready
             result
         }
     }
 
+    /**
+     * Retrieves a pre-warmed engine from the cache or creates, warms, and caches a new one.
+     * This is the core logic for managing the pool of dedicated engines.
+     */
+    private suspend fun getOrCreateWarmedEngine(
+        questionId: String,
+        prefixPrompt: String,
+        isVision: Boolean
+    ): Result<LlmInference> {
+        val engineMap = if (isVision) warmedVisionEngines else warmedTextEngines
 
-    private suspend fun gradeInternal(prompt: String, image: Bitmap? = null): Result<AiGradeResponse> = withContext(Dispatchers.IO) {
-        try {
-            val session = getOrCreateSession(isVisionEnabled = image!= null)
-            session.addQueryChunk(prompt)
+        // If a dedicated engine for this question already exists, return it immediately.
+        engineMap[questionId]?.let {
+            Log.d(TAG, "Found existing warmed engine for Q-ID: $questionId")
+            return Result.success(it)
+        }
+
+        // If not found, create and warm a new one. This is the slow, one-time operation for this question.
+        Log.i(TAG, "No engine for Q-ID: $questionId. Creating and warming a new one...")
+        _modelState.value = ModelState.LoadingModel
+
+        Log.d(TAG, "Model path check before")
+        val modelPath = userPreferencesRepo.aiModelPathFlow.first()
+        Log.d(TAG, "Model path check after")
+        if (modelPath.isNullOrBlank()) {
+            val error = IllegalArgumentException("Model path not set.")
+            _modelState.value = ModelState.Failed(error)
+            return Result.failure(error)
+        }
+
+        return try {
+            val options = LlmInference.LlmInferenceOptions.builder()
+                .setModelPath(modelPath)
+                .setMaxTokens(1024)
+                .apply { if (isVision) setMaxNumImages(1) }
+                .setPreferredBackend(LlmInference.Backend.CPU)
+                .build()
+            memoryLogger.logMemory(TAG, "Before creating new engine")
+            val newEngine = LlmInference.createFromOptions(context, options)
+            memoryLogger.logMemory(TAG, "After creating new engine")
+
+            // Perform the expensive prefill on the prefix to populate the engine's KV Cache.
+            Log.d(TAG, "Warming engine for Q-ID: $questionId")
+            warmEngine(newEngine, prefixPrompt, isVision)
+            Log.d(TAG, "Engine warmed for Q-ID: $questionId")
+
+            // Store the new, warmed engine in our map for future reuse.
+            engineMap[questionId] = newEngine
+            Log.i(TAG, "Successfully created and warmed engine for Q-ID: $questionId")
+            _modelState.value = ModelState.Ready
+            Result.success(newEngine)
+        } catch (e: Exception) {
+            _modelState.value = ModelState.Failed(e)
+            Log.e(TAG, "Failed to create or warm new engine for Q-ID: $questionId", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Performs the fast inference on the suffix, assuming the engine is already warmed.
+     * This function creates a lightweight, disposable session for each student answer.
+     */
+    private fun gradeInternalSuffix(
+        engine: LlmInference,
+        suffixPrompt: String,
+        image: Bitmap? = null
+    ): Result<AiGradeResponse> {
+        var session: LlmInferenceSession? = null
+        return try {
+            val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .setTopK(1)
+                .setTemperature(0.1f)
+                .build()
+
+            // Create a lightweight session from the dedicated, pre-warmed engine.
+            session = LlmInferenceSession.createFromOptions(engine, sessionOptions)
+
+            session.addQueryChunk(suffixPrompt)
             if (image!= null) {
                 session.addImage(BitmapImageBuilder(image).build())
             }
 
-            memoryLogger.logMemory(TAG, "Before single inference")
+            memoryLogger.logMemory(TAG, "Before fast inference (Cached Suffix)")
             val response = session.generateResponse()
-            memoryLogger.logMemory(TAG, "After single inference")
+            memoryLogger.logMemory(TAG, "After fast inference (Cached Suffix)")
 
             val parsedResponse = parseJsonResponse(response)
-
             if (parsedResponse.score == null || parsedResponse.feedback.isNullOrBlank()) {
-                Result.failure(Exception("AI response was incomplete or in an invalid format."))
+                Result.failure(Exception("AI response was incomplete or invalid."))
             } else {
                 Result.success(parsedResponse)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error during internal AI grading", e)
-            activeSession?.close()
-            activeSession = null
             Result.failure(e)
+        } finally {
+            session?.close()
+            Log.d(TAG, "Ephemeral session closed, suffix cache purged.")
         }
     }
 
-    private suspend fun loadModelGraphInternal() {
-        if (llmInference!= null || _modelState.value is ModelState.LoadingModel) return
-
-        _modelState.value = ModelState.LoadingModel
-        val modelPath = userPreferencesRepo.aiModelPathFlow.first()
-        if (modelPath.isNullOrBlank()) {
-            _modelState.value = ModelState.Failed(IllegalArgumentException("Model path is not set."))
-            return
-        }
-
+    /**
+     * Performs the expensive, one-time prefill operation to populate an engine's shared KV Cache.
+     * This function is synchronous and will throw an exception on failure, which is caught
+     * by the calling function.
+     */
+    private fun warmEngine(engine: LlmInference, warmupPrompt: String, isVision: Boolean) {
+        var session: LlmInferenceSession? = null
         try {
-            memoryLogger.logMemory(TAG, "[Engine] Before loading Gemma model")
-            val options = LlmInference.LlmInferenceOptions.builder()
-                .setModelPath(modelPath)
-                .setMaxTopK(40)
-                .setMaxTokens(512)
-                .setMaxNumImages(1)
-                .build()
-            llmInference = LlmInference.createFromOptions(context, options)
-            memoryLogger.logMemory(TAG, "[Engine] After loading Gemma model")
-            _modelState.value = ModelState.ModelReadyCold
-            Log.i(TAG, "Model graph loaded and is ready cold.")
+            val sessionOptionsBuilder = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+                .setTopK(1)
+                .setTemperature(0.1f)
+
+            if (isVision) {
+                sessionOptionsBuilder.setGraphOptions(
+                    GraphOptions.builder().setEnableVisionModality(true).build()
+                )
+            }
+            session = LlmInferenceSession.createFromOptions(engine, sessionOptionsBuilder.build())
+            session.addQueryChunk(warmupPrompt)
+            memoryLogger.logMemory(TAG, "[Warm-up] Before warm engine")
+            session.generateResponse()
+            memoryLogger.logMemory(TAG, "[Warm-up] After warm engine")
         } catch (e: Exception) {
-            _modelState.value = ModelState.Failed(e)
-            Log.e(TAG, "Failed to initialize AI Engine", e)
-            releaseModel()
+            Log.e(TAG, "Failed to warm engine.", e)
+            throw e
+        } finally {
+            session?.close()
         }
     }
 
-    suspend fun ensureModelIsLoaded() {
-        if (_modelState.value is ModelState.Uninitialized) {
-            Log.d(TAG, "Model is uninitialized. Triggering background load.")
-            loadModelGraphInternal()
+    /**
+     * Encapsulates the logic for building the static prefix and dynamic suffix.
+     * Returns a Pair where the first element is the prefix and the second is the suffix.
+     */
+    private fun buildPrompts(question: AssessmentQuestion, answer: AssessmentAnswer?): Pair<String, String> {
+        val studentAnswerContent = if (answer == null || (answer.textResponse.isNullOrBlank() && answer.imageFilePath.isNullOrBlank())) {
+            ""
+        } else {
+            when {
+                !answer.textResponse.isNullOrBlank() &&!answer.imageFilePath.isNullOrBlank() ->
+                    """
+                    STUDENT_TEXT: "${answer.textResponse}"
+                    STUDENT_IMAGE_CONTEXT: provided
+                    """.trimIndent()
+
+                !answer.textResponse.isNullOrBlank() -> "STUDENT_TEXT: \"${answer.textResponse}\""
+                else -> "STUDENT_IMAGE_CONTEXT: provided"
+            }
         }
+
+        val answerInstruction = "Analyze and score the student's answer against the marking guide. The score MUST be an integer between 0 to ${question.maxScore}, inclusive. Also, provide concise feedback that must be under 30 words."
+
+        val prefix = """
+            GRADE_TASK
+            QUESTION: "${question.text}"
+            MARKING_GUIDE: "${question.markingGuide}"
+            MAX_SCORE: ${question.maxScore}
+            INSTRUCTIONS: $answerInstruction
+            OUTPUT_FORMAT: Respond with a single, compact JSON object only. Example: {"score":<int>,"feedback":"<string>"}
+        """.trimIndent()
+
+        val suffix = studentAnswerContent
+
+        return Pair(prefix, suffix)
     }
 
-    fun releaseModel() {
-        activeSession?.close()
-        activeSession = null
-        llmInference?.close()
-        llmInference = null
-        _modelState.value = ModelState.Uninitialized
-        Log.i(TAG, "Main LlmInference model instance released.")
-        memoryLogger.logMemory(TAG, "After releasing model")
+    /**
+     * Releases all cached engine instances to free up memory.
+     * This should be called when the grading screen is closed or the app is backgrounded.
+     */
+    suspend fun releaseModels() {
+        inferenceMutex.withLock {
+            Log.i(TAG, "Releasing all LlmInference engines...")
+            warmedTextEngines.values.forEach { it.close() }
+            warmedTextEngines.clear()
+            warmedVisionEngines.values.forEach { it.close() }
+            warmedVisionEngines.clear()
+            _modelState.value = ModelState.Uninitialized
+            Log.i(TAG, "All LlmInference model instances released.")
+            memoryLogger.logMemory(TAG, "After releasing models")
+        }
     }
 
     private fun parseJsonResponse(response: String): AiGradeResponse {
@@ -209,30 +288,5 @@ class GemmaAiService @Inject constructor(
             Log.e(TAG, "Failed to parse JSON string: $jsonString", e)
             AiGradeResponse(null, "Error: The AI returned an invalid format. Raw response: $response")
         }
-    }
-
-    private fun getOrCreateSession(isVisionEnabled: Boolean): LlmInferenceSession {
-        // If a session exists but its modality doesn't match the request, close it.
-        if (activeSession!= null && isVisionSession!= isVisionEnabled) {
-            activeSession?.close()
-            activeSession = null
-        }
-
-        // If no session exists, create a new one with the correct options.
-        if (activeSession == null) {
-            Log.d(TAG, "Creating new LlmInferenceSession. Vision enabled: $isVisionEnabled")
-            val sessionOptionsBuilder = LlmInferenceSession.LlmInferenceSessionOptions.builder()
-                .setTopK(40)
-                .setTemperature(0.8f)
-
-            if (isVisionEnabled) {
-                sessionOptionsBuilder.setGraphOptions(
-                    GraphOptions.builder().setEnableVisionModality(true).build()
-                )
-            }
-            activeSession = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptionsBuilder.build())
-            isVisionSession = isVisionEnabled
-        }
-        return activeSession!!
     }
 }

@@ -5,22 +5,33 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
+import com.nexttechtitan.aptustutor.utils.NetworkUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -30,74 +41,112 @@ class AiSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPreferencesRepo: UserPreferencesRepository,
     private val workManager: WorkManager,
-    private val gemmaAiService: GemmaAiService
+    private val gemmaAiService: GemmaAiService,
+    private val networkUtils: NetworkUtils
 ) : ViewModel() {
 
     val modelStatus = userPreferencesRepo.aiModelStatusFlow
-    val modelInitialized = userPreferencesRepo.aiModelInitializedFlow
-    val modelState = gemmaAiService.modelState
+    val gemmaModelState = gemmaAiService.modelState
 
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
 
-    fun startCloudDownload() {
+    private val _isLoadingFromStorage = MutableStateFlow(false)
+    val isLoadingFromStorage = _isLoadingFromStorage.asStateFlow()
+
+    private val _showMeteredNetworkDialog = MutableStateFlow(false)
+    val showMeteredNetworkDialog = _showMeteredNetworkDialog.asStateFlow()
+
+
+    val downloadWorkInfo: StateFlow<WorkInfo?> =
+        workManager.getWorkInfosForUniqueWorkLiveData(ModelDownloadWorker.WORK_NAME)
+            .asFlow()
+            .map { it.firstOrNull() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    fun onDownloadAction() {
         viewModelScope.launch {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.UNMETERED)
-                .build()
-
-            val downloadRequest = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
-                .setConstraints(constraints)
-                .build()
-
-            workManager.enqueueUniqueWork(
-                ModelDownloadWorker.WORK_NAME,
-                ExistingWorkPolicy.KEEP, // Don't start a new one if it's already running
-                downloadRequest
-            )
-            _toastEvents.emit("Model download scheduled. Will begin on Wi-Fi.")
+            if (networkUtils.isWifiConnected()) {
+                // If on Wi-Fi, start immediately.
+                startDownload(useMeteredNetwork = false)
+                _toastEvents.emit("Download scheduled. Will begin on Wi-Fi.")
+            } else {
+                // If not on Wi-Fi, show the confirmation dialog.
+                _showMeteredNetworkDialog.value = true
+            }
         }
+    }
+
+    fun confirmMeteredDownload() {
+        viewModelScope.launch {
+            _showMeteredNetworkDialog.value = false
+            startDownload(useMeteredNetwork = true)
+            _toastEvents.emit("Download scheduled. Will use mobile data.")
+        }
+    }
+
+    fun dismissMeteredDialog() {
+        _showMeteredNetworkDialog.value = false
+    }
+
+    private fun startDownload(useMeteredNetwork: Boolean) {
+        val networkType = if (useMeteredNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(networkType)
+            .build()
+
+        val downloadRequest = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
+            .setConstraints(constraints)
+            .build()
+
+        workManager.enqueueUniqueWork(
+            ModelDownloadWorker.WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            downloadRequest
+        )
     }
 
     fun loadModelFromUri(uri: Uri) {
         viewModelScope.launch {
+            val fileName = context.contentResolver.getFileName(uri)
+            if (fileName?.endsWith(".task")!= true) {
+                _toastEvents.emit("Invalid file. Please select a.task model file.")
+                return@launch
+            }
+
+            _isLoadingFromStorage.value = true
             try {
-                val fileName = context.contentResolver.getFileName(uri)
-                if (fileName?.endsWith(".task") != true) {
-                    _toastEvents.emit("Invalid file. Please select a .task model file.")
-                    return@launch
-                }
-                val destinationFile = File(context.filesDir, "gemma-model.task")
-                val inputStream = context.contentResolver.openInputStream(uri)
-                val outputStream = FileOutputStream(destinationFile)
-
-                inputStream?.use { input ->
-                    outputStream.use { output ->
-                        input.copyTo(output)
+                withContext(Dispatchers.IO) {
+                    val destinationFile = File(context.filesDir, "gemma-3n-e2b-it-int4.task")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(destinationFile).use { output ->
+                            input.copyTo(output)
+                        }
                     }
+                    userPreferencesRepo.setAiModel(ModelStatus.DOWNLOADED, destinationFile.absolutePath)
                 }
-
-                userPreferencesRepo.setAiModel(ModelStatus.DOWNLOADED, destinationFile.absolutePath)
                 _toastEvents.emit("Model loaded successfully!")
             } catch (e: Exception) {
                 _toastEvents.emit("Error: Could not load model from file.")
+            } finally {
+                _isLoadingFromStorage.value = false
             }
         }
     }
 
-    fun runAiInitialization() {
+    fun deleteModel() {
         viewModelScope.launch {
-            if (modelStatus.first() == ModelStatus.DOWNLOADED) {
-                gemmaAiService.initializeAndWarmUp()
-            } else {
-                _toastEvents.emit("Model must be downloaded first.")
+            val modelPath = userPreferencesRepo.aiModelPathFlow.first()
+            if (modelPath!= null) {
+                val file = File(modelPath)
+                if (file.exists()) {
+                    file.delete()
+                }
             }
-        }
-    }
-
-    fun ensureModelLoaded() {
-        viewModelScope.launch {
-            gemmaAiService.ensureModelIsLoaded()
+            // Reset preferences and release the model from memory
+            userPreferencesRepo.setAiModel(ModelStatus.NOT_DOWNLOADED)
+            gemmaAiService.releaseModels()
+            _toastEvents.emit("Model removed from app storage.")
         }
     }
 }

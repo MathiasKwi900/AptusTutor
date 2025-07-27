@@ -22,7 +22,7 @@ import com.nexttechtitan.aptustutor.ui.student.AssessmentScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardViewModel
 import com.nexttechtitan.aptustutor.ui.student.SubmissionResultScreen
-import com.nexttechtitan.aptustutor.ui.tutor.AiTestScreen
+import com.nexttechtitan.aptustutor.ui.tutor.AptusHubScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SubmissionDetailsScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorDashboardScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorHistoryScreen
@@ -37,7 +37,7 @@ enum class AptusTutorScreen {
     SubmissionDetailsScreen,
     SubmissionResult,
     AiSettings,
-    AiTestScreen
+    AptusHubScreen
 }
 
 @Composable
@@ -133,8 +133,8 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
             AiSettingsScreen(onNavigateBack = { navController.popBackStack() })
         }
 
-        composable(AptusTutorScreen.AiTestScreen.name) {
-            AiTestScreen(onNavigateBack = { navController.popBackStack() })
+        composable(AptusTutorScreen.AptusHubScreen.name) {
+            AptusHubScreen(onNavigateBack = { navController.popBackStack() }, navController = navController)
         }
     }
 }
