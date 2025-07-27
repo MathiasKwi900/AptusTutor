@@ -20,7 +20,8 @@ data class AssessmentBlueprint(
     val sessionId: String,
     val title: String,
     val questions: List<AssessmentQuestion>,
-    val durationInMinutes: Int
+    val durationInMinutes: Int,
+    val sentTimestamp: Long = System.currentTimeMillis()
 )
 
 // The assessment payload sent to the student
@@ -29,7 +30,8 @@ data class AssessmentForStudent(
     val sessionId: String,
     val title: String,
     val questions: List<StudentAssessmentQuestion>,
-    val durationInMinutes: Int
+    val durationInMinutes: Int,
+    val sentTimestamp: Long
 )
 
 // A generic wrapper for all messages sent via BYTES payload

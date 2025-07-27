@@ -182,7 +182,8 @@ class AptusTutorRepository @Inject constructor(
                 sessionId = assessmentBlueprint.sessionId,
                 title = assessmentBlueprint.title,
                 questions = assessmentBlueprint.questions,
-                durationInMinutes = assessmentBlueprint.durationInMinutes
+                durationInMinutes = assessmentBlueprint.durationInMinutes,
+                sentTimestamp = assessmentBlueprint.sentTimestamp
             )
             assessmentDao.insertAssessment(assessmentEntity)
 
@@ -202,11 +203,17 @@ class AptusTutorRepository @Inject constructor(
                 sessionId = assessmentBlueprint.sessionId,
                 title = assessmentBlueprint.title,
                 questions = studentQuestions,
-                durationInMinutes = assessmentBlueprint.durationInMinutes
+                durationInMinutes = assessmentBlueprint.durationInMinutes,
+                sentTimestamp = assessmentBlueprint.sentTimestamp
             )
 
             // 3. Send the main assessment data first
-            _tutorUiState.update { it.copy(isAssessmentActive = true, activeAssessment = assessmentEntity) }
+            _tutorUiState.update {
+                it.copy(
+                    sentAssessments = it.sentAssessments + assessmentEntity,
+                    viewingAssessmentId = assessmentEntity.id
+                )
+            }
             val wrapper = PayloadWrapper(type = "START_ASSESSMENT", jsonData = gson.toJson(assessmentForStudent))
             val mainPayload = Payload.fromBytes(gson.toJson(wrapper).toByteArray(Charsets.UTF_8))
 
@@ -898,7 +905,8 @@ class AptusTutorRepository @Inject constructor(
                     maxScore = it.maxScore
                 )
             },
-            durationInMinutes = assessmentForStudent.durationInMinutes
+            durationInMinutes = assessmentForStudent.durationInMinutes,
+            sentTimestamp = assessmentForStudent.sentTimestamp
         )
 
         // 2. Insert the assessment into the student's local database.
@@ -994,5 +1002,9 @@ class AptusTutorRepository @Inject constructor(
 
     fun getAssessmentById(assessmentId: String): Flow<Assessment?> {
         return assessmentDao.getAssessmentById(assessmentId)
+    }
+
+    fun selectAssessmentToView(assessmentId: String?) {
+        _tutorUiState.update { it.copy(viewingAssessmentId = assessmentId) }
     }
 }

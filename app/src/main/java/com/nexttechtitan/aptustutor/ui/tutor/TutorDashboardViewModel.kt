@@ -28,12 +28,14 @@ import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -59,7 +61,7 @@ class TutorDashboardViewModel @Inject constructor(
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
 
-    private val _navigationEvents = MutableSharedFlow<Unit>()
+    private val _navigationEvents = MutableSharedFlow<String>()
     val navigationEvents = _navigationEvents.asSharedFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -75,12 +77,11 @@ class TutorDashboardViewModel @Inject constructor(
     @OptIn(ExperimentalCoroutinesApi::class)
     val submissionsWithStatus: StateFlow<List<SubmissionWithStatus>> =
         uiState.flatMapLatest { state ->
-            val assessmentId = state.activeAssessment?.id
+            val assessmentId = state.viewingAssessmentId
             if (assessmentId != null) {
-                // Combine the submissions flow with the assessment flow
                 combine(
                     repository.getSubmissionsFlowForAssessment(assessmentId),
-                    repository.getAssessmentById(assessmentId).filterNotNull()
+                    flowOf(state.sentAssessments.find { it.id == assessmentId }).filterNotNull()
                 ) { submissions, assessment ->
                     submissions.map { submission ->
                         SubmissionWithStatus(
@@ -127,6 +128,32 @@ class TutorDashboardViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = false
         )
+
+    val isNewAssessmentAllowed: StateFlow<Boolean> = combine(
+            uiState,
+            flow {
+                while (true) {
+                    emit(Unit)
+                    delay(1000)
+                }
+            }
+        ) { state, _ ->
+            val lastAssessment = state.sentAssessments.maxByOrNull { it.sentTimestamp }
+            if (lastAssessment == null) {
+                true
+            } else {
+                val endTime = lastAssessment.sentTimestamp + (lastAssessment.durationInMinutes * 60 * 1000)
+                System.currentTimeMillis() >= endTime
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = true
+        )
+
+    fun selectAssessmentToView(assessmentId: String?) {
+        repository.selectAssessmentToView(assessmentId)
+    }
 
     fun sendAllPendingFeedback() {
         val sessionId = uiState.value.activeSession?.sessionId ?: return
@@ -229,33 +256,14 @@ class TutorDashboardViewModel @Inject constructor(
             val currentRole = userPreferencesRepository.userRoleFlow.first()
             val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
             repository.switchUserRole(newRole)
-            _navigationEvents.emit(Unit)
+
+            val destination = if (newRole == "TUTOR") {
+                AptusTutorScreen.TutorDashboard.name
+            } else {
+                AptusTutorScreen.StudentDashboard.name
+            }
+            _navigationEvents.emit(destination)
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        viewModelScope.launch {
-            gemmaAiService.releaseModels()
-        }
-    }
-
-    fun startAiBatchGrading() {
-        val assessmentId = uiState.value.activeAssessment?.id ?: return
-        viewModelScope.launch { _toastEvents.emit("AI batch grading has been scheduled...") }
-
-        // Create the input data for the worker
-        val inputData = Data.Builder()
-            .putString(AIBatchGradingWorker.KEY_ASSESSMENT_ID, assessmentId)
-            .build()
-
-        // Build the request
-        val batchGradingRequest = OneTimeWorkRequestBuilder<AIBatchGradingWorker>()
-            .setInputData(inputData)
-            .build()
-
-        // Enqueue the work
-        workManager.enqueue(batchGradingRequest)
     }
 
     fun errorShown() {

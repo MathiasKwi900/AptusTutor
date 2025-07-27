@@ -12,7 +12,9 @@ import javax.inject.Singleton
 @Singleton
 class ThermalManager @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val powerManager = ContextCompat.getSystemService(context, PowerManager::class.java)
+    private val powerManager by lazy {
+        ContextCompat.getSystemService(context, PowerManager::class.java)
+    }
 
     companion object {
         // A conservative threshold. If thermal headroom is below 25%, we should pause.
@@ -55,5 +57,21 @@ class ThermalManager @Inject constructor(@ApplicationContext private val context
 
         // If on a device with API < 29, we can't check, so we proceed.
         return true
+    }
+
+    /**
+     * Gets the thermal headroom forecast from the PowerManager.
+     * Requires API 30 (Android R) or higher.
+     * @return A float representing the headroom (lower is better), or null if not available/supported.
+     */
+    fun getThermalHeadroom(): Float? {
+        if (powerManager == null) return null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val headroom = powerManager.getThermalHeadroom(0)
+            // The API can return NaN if called too frequently or not supported.
+            // We treat NaN as "not available" by returning null.
+            return if (headroom.isNaN()) null else headroom
+        }
+        return null
     }
 }

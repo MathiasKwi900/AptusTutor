@@ -19,7 +19,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Keep the splash screen on until the start destination is determined
         installSplashScreen().setKeepOnScreenCondition {
             mainViewModel.startDestination.value == null
         }

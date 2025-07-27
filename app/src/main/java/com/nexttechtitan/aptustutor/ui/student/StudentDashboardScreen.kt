@@ -126,6 +126,16 @@ fun StudentDashboardScreen(
             )
         }
     }
+    LaunchedEffect(key1 = Unit) {
+        viewModel.navigationEvents.collect { destination ->
+            navController.navigate(destination) {
+                popUpTo(0) {
+                    inclusive = true
+                }
+                launchSingleTop = true
+            }
+        }
+    }
 
     val permissionState = rememberMultiplePermissionsState(
         permissions = requiredPermissions

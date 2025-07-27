@@ -156,19 +156,21 @@ fun AiSettingsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.8f))
                         .clickable(enabled = false, onClick = {}),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.padding(32.dp)
                     ) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.surface)
+                        CircularProgressIndicator(color = Color.White)
                         Text(
                             "Copying model to app storage...",
-                            color = MaterialTheme.colorScheme.surface,
-                            style = MaterialTheme.typography.titleMedium
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }

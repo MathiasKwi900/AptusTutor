@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.rounded.FactCheck
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -71,6 +72,7 @@ fun TutorDashboardScreen(
     val submissions by viewModel.submissionsWithStatus.collectAsStateWithLifecycle()
     val hasPendingFeedback by viewModel.hasPendingFeedback.collectAsStateWithLifecycle()
     val hasSubmissionsToGrade by viewModel.hasSubmissionsToGrade.collectAsStateWithLifecycle()
+    val isNewAssessmentAllowed by viewModel.isNewAssessmentAllowed.collectAsStateWithLifecycle()
 
     var showCreateClassDialog by rememberSaveable { mutableStateOf(false) }
     var showStopSessionDialog by rememberSaveable { mutableStateOf(false) }
@@ -95,9 +97,12 @@ fun TutorDashboardScreen(
     }
 
     LaunchedEffect(key1 = Unit) {
-        viewModel.navigationEvents.collect {
-            navController.navigate(AptusTutorScreen.Splash.name) {
-                popUpTo(0) { inclusive = true }
+        viewModel.navigationEvents.collect { destination ->
+            navController.navigate(destination) {
+                popUpTo(0) {
+                    inclusive = true
+                }
+                launchSingleTop = true
             }
         }
     }
@@ -194,9 +199,12 @@ fun TutorDashboardScreen(
                     onMarkAbsent = { studentId -> viewModel.markStudentAbsent(studentId) },
                     onCreateAssessment = { showAssessmentTypeDialog = true },
                     onNavigateToSubmission = onNavigateToSubmission,
+                    onSelectAssessment = { assessmentId -> viewModel.selectAssessmentToView(assessmentId) },
+                    onGoBackToAssessmentList = { viewModel.selectAssessmentToView(null) },
                     hasPendingFeedback = hasPendingFeedback,
                     hasSubmissionsToGrade = hasSubmissionsToGrade,
-                    onSendAllPending = { viewModel.sendAllPendingFeedback() }
+                    onSendAllPending = { viewModel.sendAllPendingFeedback() },
+                    isNewAssessmentAllowed = isNewAssessmentAllowed,
                 )
             } else {
                 ClassManagementScreen(
@@ -306,20 +314,24 @@ fun ActiveSessionScreen(
     onMarkAbsent: (String) -> Unit,
     onCreateAssessment: () -> Unit,
     onNavigateToSubmission: (String) -> Unit,
+    onSelectAssessment: (String) -> Unit,
+    onGoBackToAssessmentList: () -> Unit,
     hasPendingFeedback: Boolean,
     hasSubmissionsToGrade: Boolean,
-    onSendAllPending: () -> Unit
+    onSendAllPending: () -> Unit,
+    isNewAssessmentAllowed: Boolean,
 ) {
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
-    val tabs = listOf("Live Roster", "Assessment")
-    val submissionCount = submissions.size
+    val tabs = listOf("Live Roster", "Assessments")
+    val assessmentCount = uiState.sentAssessments.size
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             SessionStatusHeader(
                 uiState = uiState,
                 onStopSession = onStopSession,
-                onCreateAssessment = onCreateAssessment
+                onCreateAssessment = onCreateAssessment,
+                isNewAssessmentAllowed = isNewAssessmentAllowed
             )
         }
 
@@ -333,9 +345,9 @@ fun ActiveSessionScreen(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
                         text = {
-                            if (index == 1 && uiState.isAssessmentActive) { // Show badge only for assessment tab when active
+                            if (index == 1 && assessmentCount > 0) {
                                 BadgedBox(badge = {
-                                    Badge { Text("$submissionCount") }
+                                    Badge { Text("$assessmentCount") }
                                 }) {
                                     Text(title, modifier = Modifier.padding(bottom = 8.dp))
                                 }
@@ -354,6 +366,8 @@ fun ActiveSessionScreen(
                 uiState,
                 submissions,
                 onNavigateToSubmission,
+                onSelectAssessment = onSelectAssessment,
+                onGoBackToAssessmentList = onGoBackToAssessmentList,
                 hasPendingFeedback = hasPendingFeedback,
                 hasSubmissionsToGrade = hasSubmissionsToGrade,
                 onSendAll = onSendAllPending,
@@ -366,7 +380,8 @@ fun ActiveSessionScreen(
 fun SessionStatusHeader(
     uiState: TutorDashboardUiState,
     onStopSession: () -> Unit,
-    onCreateAssessment: () -> Unit
+    onCreateAssessment: () -> Unit,
+    isNewAssessmentAllowed: Boolean
 ) {
     val activeClass = uiState.activeClass!!.classProfile
     val rosterSize = uiState.activeClass.students.size
@@ -398,10 +413,10 @@ fun SessionStatusHeader(
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(
                 onClick = onCreateAssessment,
-                enabled = !uiState.isAssessmentActive,
+                enabled = isNewAssessmentAllowed,
                 modifier = Modifier.weight(1f)
             ) {
-                Text(if (uiState.isAssessmentActive) "Assessment Sent" else "New Assessment")
+                Text("New Assessment")
             }
             Button(
                 onClick = onStopSession,
@@ -767,29 +782,71 @@ fun LazyListScope.assessmentTabContent(
     uiState: TutorDashboardUiState,
     submissions: List<SubmissionWithStatus>,
     onSubmissionClicked: (String) -> Unit,
+    onSelectAssessment: (String) -> Unit,
+    onGoBackToAssessmentList: () -> Unit,
     hasPendingFeedback: Boolean,
     hasSubmissionsToGrade: Boolean,
     onSendAll: () -> Unit
 ) {
-    if (!uiState.isAssessmentActive || uiState.activeAssessment == null) {
-        item {
-            EmptyState(
-                icon = Icons.AutoMirrored.Rounded.FactCheck,
-                headline = "No Active Assessment",
-                subline = "Create a new assessment from the main controls above to send it to the class."
-            )
-        }
-    } else {
-        item {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Submissions for: ${uiState.activeAssessment.title}", style = MaterialTheme.typography.titleLarge)
-                Text("${submissions.size} / ${uiState.connectedStudents.size} submitted", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(8.dp))
+    if (uiState.viewingAssessmentId == null) {
+        if (uiState.sentAssessments.isEmpty()) {
+            item {
+                EmptyState(
+                    icon = Icons.AutoMirrored.Rounded.FactCheck,
+                    headline = "No Active Assessment",
+                    subline = "Create a new assessment from the main controls above to send it to the class."
+                )
+            }
+        } else {
+            item {
+                Text(
+                    "Sent Assessments",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+            items(uiState.sentAssessments, key = { it.id }) { assessment ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .clickable { onSelectAssessment(assessment.id) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(assessment.title, fontWeight = FontWeight.Bold)
+                        Text("${assessment.questions.size} questions", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
         }
+    } else {
+        val viewingAssessment = uiState.sentAssessments.find { it.id == uiState.viewingAssessmentId }
+
+        item {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ADD a back button to return to the list
+                IconButton(onClick = onGoBackToAssessmentList) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to assessments")
+                }
+                Column {
+                    Text("Submissions for: ${viewingAssessment?.title}", style = MaterialTheme.typography.titleLarge)
+                    Text("${submissions.size} / ${uiState.connectedStudents.size} submitted", style = MaterialTheme.typography.titleSmall)
+                }
+            }
+        }
+
         if (submissions.isEmpty()) {
             item {
-                Text("Waiting for students to submit their answers...", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                Text(
+                    "Waiting for students to submit their answers...",
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
             }
         } else {
             items(submissions, key = { it.submission.submissionId }) { item ->
@@ -805,8 +862,16 @@ fun LazyListScope.assessmentTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(item.submission.studentName, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                        Text(item.statusText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            item.submission.studentName,
+                            modifier = Modifier.weight(1f),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            item.statusText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -814,7 +879,10 @@ fun LazyListScope.assessmentTabContent(
                 if (submissions.isNotEmpty()) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                        horizontalArrangement = Arrangement.spacedBy(
+                            16.dp,
+                            Alignment.CenterHorizontally
+                        )
                     ) {
                         // This is the new button
                         Button(
