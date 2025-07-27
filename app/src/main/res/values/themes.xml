@@ -2,4 +2,11 @@
 <resources>
 
     <style name="Theme.AptusTutor" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@drawable/splash_background</item>
+
+        <item name="windowSplashScreenAnimatedIcon">@null</item>
+
+        <item name="postSplashScreenTheme">@style/Theme.AptusTutor</item>
+    </style>
 </resources>

@@ -56,19 +56,19 @@ fun SubmissionDetailsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val modelState by viewModel.modelState.collectAsStateWithLifecycle()
-    val modelInitialized by viewModel.modelInitialized.collectAsStateWithLifecycle(initialValue = false)
+    val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle()
     val submission = uiState.submission
     val assessment = uiState.assessment
     val draftAnswers = uiState.draftAnswers
     var showSendConfirmationDialog by rememberSaveable { mutableStateOf(false) }
 
-    val isAiReadyForGrading by remember {
-        derivedStateOf { modelState is GemmaAiService.ModelState.ModelReadyCold || modelState is GemmaAiService.ModelState.Ready }
-    }
-
     val containsMcq by remember(assessment) {
         derivedStateOf { assessment?.questions?.any { it.type == QuestionType.MULTIPLE_CHOICE }?: false }
     }
+
+    val isAiBusy = uiState.isGradingEntireSubmission ||
+            modelState is GemmaAiService.ModelState.Busy ||
+            modelState is GemmaAiService.ModelState.LoadingModel
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -119,17 +119,17 @@ fun SubmissionDetailsScreen(
 
                     SubmissionActionsMenu(
                         containsMcq = containsMcq,
-                        isAiReady = isAiReadyForGrading && modelInitialized,
-                        isAiBusy = uiState.isGradingEntireSubmission,
+                        isModelDownloaded = modelStatus == ModelStatus.DOWNLOADED,
+                        isAiBusy = isAiBusy,
                         isFeedbackSent = uiState.feedbackSent,
                         onAutoGradeMcq = { viewModel.autoGradeMcqQuestions() },
                         onGradeWithAi = {
-                            if (isAiReadyForGrading && modelInitialized) {
+                            if (modelStatus == ModelStatus.DOWNLOADED) {
                                 viewModel.gradeEntireSubmission()
                             } else {
                                 scope.launch {
                                     val result = snackbarHostState.showSnackbar(
-                                        message = "AI Engine needs a one-time setup. Please go to settings to initialize.",
+                                        message = if (modelStatus == ModelStatus.NOT_DOWNLOADED) "AI model is not downloaded." else "Model is still downloading.",
                                         actionLabel = "Settings",
                                         duration = SnackbarDuration.Long
                                     )
@@ -250,7 +250,7 @@ fun SubmissionDetailsScreen(
 @Composable
 fun SubmissionActionsMenu(
     containsMcq: Boolean,
-    isAiReady: Boolean,
+    isModelDownloaded: Boolean,
     isAiBusy: Boolean,
     isFeedbackSent: Boolean,
     onAutoGradeMcq: () -> Unit,
@@ -281,7 +281,7 @@ fun SubmissionActionsMenu(
                     showMenu = false
                 },
                 leadingIcon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
-                enabled = isAiReady &&!isAiBusy &&!isFeedbackSent
+                enabled = isModelDownloaded &&!isAiBusy &&!isFeedbackSent
             )
         }
     }

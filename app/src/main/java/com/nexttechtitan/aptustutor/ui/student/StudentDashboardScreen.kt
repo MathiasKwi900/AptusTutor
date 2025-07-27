@@ -192,17 +192,14 @@ fun StudentDashboardScreen(
         },
         containerColor = MaterialTheme.colorScheme.surface
     ) { paddingValues ->
-        // The main layout is a single LazyColumn for better performance and a unified scroll experience.
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // --- DYNAMIC HUB: Shows connection status or discovery tools ---
             item {
                 val isConnected = uiState.connectionStatus == "Connected" && uiState.connectedSession != null
-                // This LaunchedEffect is from your original logic to manage state transitions
                 LaunchedEffect(isConnected) {
                     if (isConnected) {
                         userWantsToDiscover = false

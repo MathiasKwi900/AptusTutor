@@ -47,6 +47,9 @@ class StudentDashboardViewModel @Inject constructor(
     private val _events = MutableSharedFlow<String>()
     val events = _events.asSharedFlow()
 
+    private val _navigationEvents = MutableSharedFlow<Unit>()
+    val navigationEvents = _navigationEvents.asSharedFlow()
+
     val textAnswers = mutableStateMapOf<String, String>()
     val imageAnswers = mutableStateMapOf<String, Uri>()
     private var currentSubmissionId: String? = null
@@ -179,6 +182,7 @@ class StudentDashboardViewModel @Inject constructor(
             val currentRole = userPreferencesRepository.userRoleFlow.first()
             val newRole = if (currentRole == "TUTOR") "STUDENT" else "TUTOR"
             repository.switchUserRole(newRole)
+            _navigationEvents.emit(Unit)
         }
     }
 

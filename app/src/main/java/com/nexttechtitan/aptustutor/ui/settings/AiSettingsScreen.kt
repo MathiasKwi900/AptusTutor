@@ -2,25 +2,71 @@ package com.nexttechtitan.aptustutor.ui.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.RocketLaunch
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Verified
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.work.WorkInfo
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
+import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import kotlinx.coroutines.flow.collectLatest
 
@@ -31,10 +77,12 @@ fun AiSettingsScreen(
     viewModel: AiSettingsViewModel = hiltViewModel()
 ) {
     val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle(initialValue = ModelStatus.NOT_DOWNLOADED)
-    val modelInitialized by viewModel.modelInitialized.collectAsStateWithLifecycle(initialValue = false)
-    val modelState by viewModel.modelState.collectAsStateWithLifecycle()
-
+    val gemmaModelState by viewModel.gemmaModelState.collectAsStateWithLifecycle()
+    val downloadWorkInfo by viewModel.downloadWorkInfo.collectAsStateWithLifecycle()
+    val showMeteredDialog by viewModel.showMeteredNetworkDialog.collectAsStateWithLifecycle()
+    val isLoadingFromStorage by viewModel.isLoadingFromStorage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -48,10 +96,21 @@ fun AiSettingsScreen(
         }
     }
 
-    LaunchedEffect(modelStatus) {
-        if (modelStatus == ModelStatus.DOWNLOADED) {
-            viewModel.ensureModelLoaded()
-        }
+    if (showDeleteDialog) {
+        DeleteConfirmationDialog(
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                viewModel.deleteModel()
+                showDeleteDialog = false
+            }
+        )
+    }
+
+    if (showMeteredDialog) {
+        MeteredNetworkDialog(
+            onDismiss = { viewModel.dismissMeteredDialog() },
+            onConfirm = { viewModel.confirmMeteredDownload() }
+        )
     }
 
     Scaffold(
@@ -67,167 +126,218 @@ fun AiSettingsScreen(
             )
         }
     ) { paddingValues ->
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                ModelStatusCard(
+                    modelStatus = modelStatus,
+                    gemmaModelState = gemmaModelState,
+                    workInfo = downloadWorkInfo
+                )
+
+                GetModelCard(
+                    modelStatus = modelStatus,
+                    onDownload = { viewModel.onDownloadAction() },
+                    onLoadFromFile = { filePickerLauncher.launch("*/*") }
+                )
+
+                ManageModelCard(
+                    modelStatus = modelStatus,
+                    onDelete = { showDeleteDialog = true }
+                )
+            }
+            if (isLoadingFromStorage) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
+                        .clickable(enabled = false, onClick = {}),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.surface)
+                        Text(
+                            "Copying model to app storage...",
+                            color = MaterialTheme.colorScheme.surface,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelStatusCard(
+    modelStatus: ModelStatus,
+    gemmaModelState: GemmaAiService.ModelState,
+    workInfo: WorkInfo?
+) {
+    val progress = workInfo?.progress?.getInt(ModelDownloadWorker.PROGRESS, 0)?: 0
+    val animatedProgress by animateFloatAsState(targetValue = progress / 100f, label = "downloadProgress")
+
+    Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp),
+                .padding(16.dp)
+                .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    when (modelStatus) {
-                        ModelStatus.NOT_DOWNLOADED -> {
-                            Text("The Gemma 3n model is not installed.", color = MaterialTheme.colorScheme.error)
-                            Text(
-                                "Download it from the cloud or load it from your device storage to enable AI features.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                        ModelStatus.DOWNLOADING -> {
-                            Text("Downloading model...", color = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.height(8.dp))
-                            CircularProgressIndicator()
-                            Text(
-                                "Download will proceed in the background on Wi-Fi.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-                        ModelStatus.DOWNLOADED -> {
-                            if (!modelInitialized) {
-                                Spacer(Modifier.height(16.dp))
-                                InitializationCard(
-                                    modelState = modelState,
-                                    onInitialize = viewModel::runAiInitialization
-                                )
-                            } else {
-                                ReadyCardContent()
-                            }
-                        }
-                    }
-                }
+            val (icon, text, color) = when (modelStatus) {
+                ModelStatus.NOT_DOWNLOADED -> Triple(Icons.Rounded.Error, "Model Not Installed", MaterialTheme.colorScheme.error)
+                ModelStatus.DOWNLOADING -> Triple(Icons.Rounded.Downloading, "Downloading Model...", MaterialTheme.colorScheme.primary)
+                ModelStatus.DOWNLOADED -> Triple(Icons.Rounded.CheckCircle, "Model Ready for Use", Color(0xFF34A853))
             }
 
-            Spacer(Modifier.height(24.dp))
+            Icon(imageVector = icon, contentDescription = text, tint = color, modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(text, style = MaterialTheme.typography.titleLarge, color = color)
 
-            Text(
-                "For Development/Testing",
-                style = MaterialTheme.typography.labelSmall
-            )
+            if (modelStatus == ModelStatus.DOWNLOADING) {
+                Spacer(modifier = Modifier.height(12.dp))
+                LinearProgressIndicator(
+                    progress = { animatedProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("$progress%", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GetModelCard(
+    modelStatus: ModelStatus,
+    onDownload: () -> Unit,
+    onLoadFromFile: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Get Model", style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider()
             Button(
-                onClick = { filePickerLauncher.launch("*/*") },
+                onClick = onDownload,
+                enabled = modelStatus == ModelStatus.NOT_DOWNLOADED,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.FolderOpen, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Load Model From Device")
-            }
-
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(16.dp))
-
-            Text(
-                "For Production Use",
-                style = MaterialTheme.typography.labelSmall
-            )
-            Button(
-                onClick = { viewModel.startCloudDownload() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = false
-                //enabled = modelStatus != ModelStatus.DOWNLOADING
-            ) {
-                Icon(Icons.Default.CloudDownload, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Download From Cloud (Wi-Fi)")
+                Icon(Icons.Rounded.CloudDownload, contentDescription = null)
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text("Download from Cloud")
             }
             Text(
-                "Cloud download functionality is under development.",
-                style = MaterialTheme.typography.labelSmall,
+                "Download is managed by your device and will continue in the background, even if you close the app. You will see progress in your system notifications.",
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-    }
-}
-
-@Composable
-private fun InitializationCard(
-    modelState: GemmaAiService.ModelState,
-    onInitialize: () -> Unit
-) {
-    val isWorking = modelState is GemmaAiService.ModelState.LoadingModel ||
-            modelState is GemmaAiService.ModelState.WarmingUp ||
-            modelState is GemmaAiService.ModelState.Busy
-
-    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(4.dp)) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            when (modelState) {
-                is GemmaAiService.ModelState.ModelReadyCold -> {
-                    Icon(
-                        Icons.Rounded.RocketLaunch,
-                        contentDescription = "Initializing",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text("Final Step: Initialize AI Engine", style = MaterialTheme.typography.headlineSmall)
-                    Text("Run a one-time process to make AI grading significantly faster. This may take several minutes. Please keep the app open.", textAlign = TextAlign.Center)
-                    Button(onClick = onInitialize, modifier = Modifier.fillMaxWidth()) {
-                        Text("Start Initialization")
-                    }
-                }
-                is GemmaAiService.ModelState.LoadingModel -> {
-                    CircularProgressIndicator()
-                    Text("Loading AI Model...", style = MaterialTheme.typography.titleMedium)
-                }
-                is GemmaAiService.ModelState.WarmingUp -> {
-                    CircularProgressIndicator()
-                    Text("Warming Up: ${modelState.step}", style = MaterialTheme.typography.titleMedium)
-                    Text("This is the most crucial step and will take some time. Please be patient.", textAlign = TextAlign.Center)
-                }
-                is GemmaAiService.ModelState.Ready -> {
-                    ReadyCardContent()
-                }
-                is GemmaAiService.ModelState.Failed -> {
-                    Icon(Icons.Rounded.Error,
-                        contentDescription = "Error",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text("Initialization Failed", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
-                    Text(modelState.error.message?: "An unknown error occurred.", textAlign = TextAlign.Center)
-                }
-                else -> {
-                    CircularProgressIndicator()
-                    Text("Please wait...", style = MaterialTheme.typography.titleMedium)
-                }
+            Button(
+                onClick = onLoadFromFile,
+                enabled = modelStatus == ModelStatus.NOT_DOWNLOADED,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.FolderOpen, contentDescription = null)
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text("Load from Device Storage")
             }
         }
     }
 }
 
 @Composable
-private fun ReadyCardContent() {
-    Icon(
-        Icons.Rounded.Verified,
-        contentDescription = "Ready",
-        modifier = Modifier.size(48.dp),
-        tint = Color(0xFF34A853) // Google Green
+private fun ManageModelCard(
+    modelStatus: ModelStatus,
+    onDelete: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Manage Model", style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider()
+
+            // Shareable AI Info Box
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(Icons.Rounded.Share, contentDescription = "Shareable AI", tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                Text(
+                    "Shareable AI: After downloading, the model file is also saved to your device's 'Downloads' folder. You can share this file with other tutors to save them data!",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+
+            Button(
+                onClick = onDelete,
+                enabled = modelStatus == ModelStatus.DOWNLOADED,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.DeleteForever, contentDescription = null)
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text("Delete Model from App")
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeleteConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Warning, contentDescription = "Warning") },
+        title = { Text("Delete Model?") },
+        text = {
+            Text(
+                "This will remove the AI model from this app's internal storage, disabling AI features until it's loaded again.\n\n" +
+                        "Note: If you downloaded from the cloud, a copy of the model will remain in your device's 'Downloads' folder for sharing."
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text("Delete") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
     )
-    Text("AI Engine is Ready!", style = MaterialTheme.typography.headlineSmall)
-    Text(
-        "AptusTutor is now optimized for the fastest possible on-device grading.",
-        textAlign = TextAlign.Center,
-        style = MaterialTheme.typography.bodyMedium
+}
+
+@Composable
+private fun MeteredNetworkDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.SignalCellularAlt, contentDescription = "Warning") },
+        title = { Text("No Wi-Fi Connection") },
+        text = {
+            Text("You are not connected to Wi-Fi. Downloading the AI model (approx. 3.14 GB) will use your mobile data. Do you want to continue?")
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Use Mobile Data") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Wait for Wi-Fi") }
+        }
     )
 }
