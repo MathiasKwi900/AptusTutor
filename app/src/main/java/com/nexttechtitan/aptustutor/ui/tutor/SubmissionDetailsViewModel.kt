@@ -8,7 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nexttechtitan.aptustutor.ai.AiGradeResponse
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
-import com.nexttechtitan.aptustutor.ai.ThermalManager
+import com.nexttechtitan.aptustutor.utils.ThermalManager
 import com.nexttechtitan.aptustutor.data.AptusTutorRepository
 import com.nexttechtitan.aptustutor.data.Assessment
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
@@ -19,11 +19,14 @@ import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import com.nexttechtitan.aptustutor.di.AiDispatcher
+import com.nexttechtitan.aptustutor.utils.CapabilityResult
 import com.nexttechtitan.aptustutor.utils.DeviceCapability
 import com.nexttechtitan.aptustutor.utils.DeviceHealthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -37,6 +40,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -47,7 +51,8 @@ data class SubmissionDetailsUiState(
     val feedbackSent: Boolean = false,
     val isGradingQuestionId: String? = null,
     val isGradingEntireSubmission: Boolean = false,
-    val gradingProgressText: String? = null
+    val gradingProgressText: String? = null,
+    val deviceHealth: CapabilityResult? = null
 )
 
 @HiltViewModel
@@ -70,6 +75,8 @@ class SubmissionDetailsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(SubmissionDetailsUiState())
     val uiState: StateFlow<SubmissionDetailsUiState> = _uiState.asStateFlow()
+
+    private var healthMonitoringJob: Job? = null
 
     val modelStatus = userPreferencesRepo.aiModelStatusFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ModelStatus.NOT_DOWNLOADED)
@@ -149,13 +156,25 @@ class SubmissionDetailsViewModel @Inject constructor(
                 repository.sendFeedbackAndMarkAttendance(finalSubmission)
                 _uiState.update { it.copy(feedbackSent = true) }
                 _toastEvents.emit("Feedback sent to student!")
-                _navigationEvents.emit(Unit) // Navigate back after sending.
+                _navigationEvents.emit(Unit)
             }
         }
     }
 
     private fun getQuestionNumber(questionId: String): Int {
         return (_uiState.value.assessment?.questions?.indexOfFirst { it.id == questionId } ?: -1) + 1
+    }
+
+    private fun startHealthMonitoring() {
+        healthMonitoringJob?.cancel()
+        healthMonitoringJob = viewModelScope.launch {
+            while (isActive) {
+                _uiState.update {
+                    it.copy(deviceHealth = deviceHealthManager.checkDeviceCapability())
+                }
+                delay(2000)
+            }
+        }
     }
 
     fun gradeEntireSubmission() {
@@ -182,25 +201,39 @@ class SubmissionDetailsViewModel @Inject constructor(
             Log.i(TAG, "Starting full submission AI grading for ${questionsToGrade.size} questions.")
             _uiState.update { it.copy(isGradingEntireSubmission = true) }
             _toastEvents.emit("Starting full submission AI grading...")
+            startHealthMonitoring()
 
-            for ((index, question) in questionsToGrade.withIndex()) {
-                val loopCheck = deviceHealthManager.checkDeviceCapability()
-                if (loopCheck.capability == DeviceCapability.UNSUPPORTED) {
-                    _toastEvents.emit("Grading paused due to device health: ${loopCheck.message}")
-                    _uiState.update { it.copy(isGradingEntireSubmission = false, gradingProgressText = "Paused") }
-                    return@launch
+            try {
+                for ((index, question) in questionsToGrade.withIndex()) {
+                    val loopCheck = deviceHealthManager.checkDeviceCapability()
+                    if (loopCheck.capability == DeviceCapability.UNSUPPORTED) {
+                        _toastEvents.emit("Grading paused due to device health: ${loopCheck.message}")
+                        _uiState.update {
+                            it.copy(
+                                isGradingEntireSubmission = false,
+                                gradingProgressText = "Paused"
+                            )
+                        }
+                        return@launch
+                    }
+
+                    val progressText =
+                        "Grading Question ${index + 1} of ${questionsToGrade.size}..."
+                    Log.d(TAG, progressText)
+                    _uiState.update { it.copy(gradingProgressText = progressText) }
+
+                    val answer =
+                        uiState.value.submission?.answers?.find { it.questionId == question.id }
+                    gradeSingleQuestionInternal(question, answer)
                 }
-
-                val progressText = "Grading Question ${index + 1} of ${questionsToGrade.size}..."
-                Log.d(TAG, progressText)
-                _uiState.update { it.copy(gradingProgressText = progressText) }
-
-                val answer = uiState.value.submission?.answers?.find { it.questionId == question.id }
-                gradeSingleQuestionInternal(question, answer)
+            } catch (e: Exception) {
+                _toastEvents.emit("An unexpected error occurred: ${e.message}")
+            } finally {
+                healthMonitoringJob?.cancel()
+                _uiState.update { it.copy(isGradingEntireSubmission = false, gradingProgressText = null) }
             }
 
             Log.i(TAG, "AI grading complete for all questions.")
-            _uiState.update { it.copy(isGradingEntireSubmission = false, gradingProgressText = null) }
             _toastEvents.emit("AI grading complete!")
         }
     }
@@ -275,8 +308,6 @@ class SubmissionDetailsViewModel @Inject constructor(
                 return@launch
             }
 
-            _toastEvents.emit("Auto-grading ${mcqQuestions.size} questions...")
-
             val newDrafts = _uiState.value.draftAnswers.toMutableMap()
             var gradedCount = 0
 
@@ -304,7 +335,7 @@ class SubmissionDetailsViewModel @Inject constructor(
                     draftAnswers = newDrafts
                 )
             }
-            _toastEvents.emit("Auto-grading complete for $gradedCount questions.")
+            _toastEvents.emit("Auto-grading complete for $gradedCount question(s).")
         }
     }
 
@@ -316,6 +347,7 @@ class SubmissionDetailsViewModel @Inject constructor(
             val submissionWithDrafts = submission.copy(answers = draftAnswers.values.toList())
             repository.saveSubmissionDraft(submissionWithDrafts)
             _toastEvents.emit("Draft saved successfully.")
+            _navigationEvents.emit(Unit)
         }
     }
 }

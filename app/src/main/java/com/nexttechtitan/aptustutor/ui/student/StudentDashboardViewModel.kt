@@ -193,6 +193,9 @@ class StudentDashboardViewModel @Inject constructor(
         }
     }
 
+    fun getAssessmentsForSession(sessionId: String) =
+        repository.assessmentDao.getAssessmentsForSession(sessionId)
+
     fun leaveSession() {
         repository.disconnectFromSession()
     }

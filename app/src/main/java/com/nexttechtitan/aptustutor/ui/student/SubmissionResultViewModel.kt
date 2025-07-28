@@ -22,12 +22,12 @@ class SubmissionResultViewModel @Inject constructor(
     userPreferencesRepository: UserPreferencesRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
-    private val sessionId: String = savedStateHandle.get("sessionId")!!
+    private val assessmentId: String = savedStateHandle.get("assessmentId")!!
 
     val uiState: StateFlow<SubmissionResultUiState> = userPreferencesRepository.userIdFlow
         .filterNotNull()
         .flatMapLatest { studentId ->
-            repository.getSubmissionWithAssessment(sessionId, studentId)
+            repository.assessmentDao.getSubmissionForStudentByAssessment(studentId, assessmentId)
         }
         .map { result ->
             if (result?.submission != null && result.assessment != null) {

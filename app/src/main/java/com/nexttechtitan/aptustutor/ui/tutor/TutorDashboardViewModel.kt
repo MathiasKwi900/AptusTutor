@@ -22,7 +22,7 @@ import androidx.work.WorkManager
 import com.nexttechtitan.aptustutor.ai.AIBatchGradingWorker
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.GemmaAiService.ModelState
-import com.nexttechtitan.aptustutor.ai.ThermalManager
+import com.nexttechtitan.aptustutor.utils.ThermalManager
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.ModelStatus
@@ -129,26 +129,42 @@ class TutorDashboardViewModel @Inject constructor(
             initialValue = false
         )
 
-    val isNewAssessmentAllowed: StateFlow<Boolean> = combine(
-            uiState,
-            flow {
-                while (true) {
-                    emit(Unit)
-                    delay(1000)
-                }
-            }
-        ) { state, _ ->
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val isNewAssessmentAllowed: StateFlow<Boolean> =
+        uiState.flatMapLatest { state ->
             val lastAssessment = state.sentAssessments.maxByOrNull { it.sentTimestamp }
+
+            // If no assessment has been sent, it's always allowed.
             if (lastAssessment == null) {
-                true
-            } else {
-                val endTime = lastAssessment.sentTimestamp + (lastAssessment.durationInMinutes * 60 * 1000)
-                System.currentTimeMillis() >= endTime
+                return@flatMapLatest flowOf(true)
+            }
+
+            // Get the flow of submissions for only the MOST RECENT assessment.
+            val submissionsForLastAssessmentFlow = repository.getSubmissionsFlowForAssessment(lastAssessment.id)
+
+            // Now, combine the submissions flow with our 1-second timer.
+            combine(
+                submissionsForLastAssessmentFlow,
+                flow { while (true) { emit(Unit); delay(1000) } }
+            ) { submissions, _ ->
+
+                // Condition 1: The timer has run out.
+                val timeIsUp = System.currentTimeMillis() >= (lastAssessment.sentTimestamp + (lastAssessment.durationInMinutes * 60 * 1000))
+
+                // Condition 2: All connected students have submitted.
+                val connectedStudentIds = state.connectedStudents.map { it.studentId }.toSet()
+                val submittedStudentIds = submissions.map { it.studentId }.toSet()
+
+                // This is true if the set of connected students is not empty and is a subset of (or equal to) the set of submitted students.
+                val allHaveSubmitted = connectedStudentIds.isNotEmpty() && connectedStudentIds.all { it in submittedStudentIds }
+
+                // The button is enabled if either condition is met.
+                timeIsUp || allHaveSubmitted
             }
         }.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = true
+            initialValue = true // Start with the button enabled.
         )
 
     fun selectAssessmentToView(assessmentId: String?) {

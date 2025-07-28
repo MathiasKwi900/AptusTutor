@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.Card
@@ -32,12 +34,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nexttechtitan.aptustutor.data.SessionWithClassDetails
+import com.nexttechtitan.aptustutor.ui.student.AssessmentsDialog
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,10 +52,11 @@ import java.util.concurrent.TimeUnit
 @Composable
 fun TutorHistoryScreen(
     viewModel: TutorHistoryViewModel = hiltViewModel(),
-    onNavigateToSubmission: (String) -> Unit,
+    onNavigateToSubmissionsList: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var sessionForDialog by remember { mutableStateOf<SessionWithClassDetails?>(null) }
 
     Scaffold(
         topBar = {
@@ -85,30 +91,31 @@ fun TutorHistoryScreen(
                 items(uiState.sessions, key = { it.session.sessionId }) { session ->
                     HistorySessionCard(
                         sessionDetails = session,
-                        isSelected = uiState.selectedSessionId == session.session.sessionId,
-                        submissions = uiState.submissionsForSelectedSession,
-                        onCardClicked = {
-                            if (uiState.selectedSessionId == session.session.sessionId) {
-                                viewModel.clearSelectedSession()
-                            } else {
-                                viewModel.selectSession(session.session.sessionId)
-                            }
-                        },
-                        onSubmissionClicked = onNavigateToSubmission
+                        onCardClicked = { sessionForDialog = session }
                     )
                 }
             }
         }
+    }
+    sessionForDialog?.let { item ->
+        val assessments by viewModel.getAssessmentsForSession(item.session.sessionId)
+            .collectAsStateWithLifecycle(initialValue = emptyList())
+
+        AssessmentsDialog(
+            assessments = assessments,
+            onDismiss = { sessionForDialog = null },
+            onAssessmentSelected = { assessmentId ->
+                sessionForDialog = null
+                onNavigateToSubmissionsList(assessmentId)
+            }
+        )
     }
 }
 
 @Composable
 fun HistorySessionCard(
     sessionDetails: SessionWithClassDetails,
-    isSelected: Boolean,
-    submissions: List<SubmissionWithStatus>,
-    onCardClicked: () -> Unit,
-    onSubmissionClicked: (String) -> Unit
+    onCardClicked: () -> Unit
 ) {
     val formatter = remember { SimpleDateFormat("EEE, d MMM yyyy 'at' hh:mm a", Locale.getDefault()) }
     val session = sessionDetails.session
@@ -116,10 +123,7 @@ fun HistorySessionCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         onClick = onCardClicked,
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 8.dp else 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer
-        )
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(text = sessionDetails.classProfile?.className ?: "Class Name", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -136,45 +140,6 @@ fun HistorySessionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            AnimatedVisibility(visible = isSelected) {
-                Column {
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                    Text("Submissions", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
-                    if (submissions.isEmpty()) {
-                        Text("No submissions were made for this session's assessment.")
-                    } else {
-                        submissions.forEach { item ->
-                            SubmissionItemRow(item, onSubmissionClicked)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SubmissionItemRow(
-    item: SubmissionWithStatus,
-    onSubmissionClicked: (String) -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onSubmissionClicked(item.submission.submissionId) },
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(item.submission.studentName, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text(item.statusText, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

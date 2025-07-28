@@ -128,6 +128,7 @@ class AptusTutorRepository @Inject constructor(
 
         repositoryScope.launch {
             classDao.addStudentToRoster(ClassRosterCrossRef(activeClass.classProfile.classId, request.studentId))
+            studentProfileDao.insertOrUpdateStudent(StudentProfile(request.studentId, request.studentName))
         }
         _tutorUiState.update { currentState ->
             val updatedStudentList = currentState.activeClass?.students.orEmpty() +
@@ -900,9 +901,10 @@ class AptusTutorRepository @Inject constructor(
                     id = it.id,
                     text = it.text,
                     type = it.type,
-                    markingGuide = "", // Not needed on student device
+                    markingGuide = "",
                     questionImagePath = it.questionImageFile,
-                    maxScore = it.maxScore
+                    maxScore = it.maxScore,
+                    options = it.options
                 )
             },
             durationInMinutes = assessmentForStudent.durationInMinutes,

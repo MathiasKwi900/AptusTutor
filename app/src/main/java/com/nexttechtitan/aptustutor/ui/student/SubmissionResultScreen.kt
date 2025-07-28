@@ -41,6 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.rememberAsyncImagePainter
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
 import com.nexttechtitan.aptustutor.data.AssessmentQuestion
+import com.nexttechtitan.aptustutor.data.QuestionType
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,20 +139,30 @@ fun ResultAnswerCard(
             Text("Your Answer:", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
 
-            if (!answer?.textResponse.isNullOrBlank()) {
-                Text(answer!!.textResponse)
-            } else if (!answer?.imageFilePath.isNullOrBlank()) {
-                Image(
-                    painter = rememberAsyncImagePainter(model = File(answer.imageFilePath!!)),
-                    contentDescription = "Your handwritten answer",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .clip(MaterialTheme.shapes.medium),
-                    contentScale = ContentScale.Fit
-                )
+            if (question.type == QuestionType.MULTIPLE_CHOICE) {
+                val answerIndex = answer?.textResponse?.toIntOrNull()
+                val answerText = if (answerIndex != null && question.options != null && answerIndex in question.options.indices) {
+                    "${('A' + answerIndex)}. ${question.options[answerIndex]}"
+                } else {
+                    "No answer provided."
+                }
+                Text(answerText, fontStyle = if (answerIndex == null) FontStyle.Italic else FontStyle.Normal)
             } else {
-                Text("No answer provided.", fontStyle = FontStyle.Italic)
+                if (!answer?.textResponse.isNullOrBlank()) {
+                    Text(answer!!.textResponse)
+                } else if (!answer?.imageFilePath.isNullOrBlank()) {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = File(answer.imageFilePath!!)),
+                        contentDescription = "Your handwritten answer",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(MaterialTheme.shapes.medium),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    Text("No answer provided.", fontStyle = FontStyle.Italic)
+                }
             }
 
             // --- Grade & Feedback ---

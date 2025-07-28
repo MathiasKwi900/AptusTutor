@@ -184,7 +184,7 @@ private fun UserDetailsDialog(
 ) {
     var name by remember { mutableStateOf("") }
     val isTutor = role == "TUTOR"
-    val labelText = if (isTutor) "Your Full Name (e.g., Mr. Alex)" else "Your Full Name"
+    val labelText = if (isTutor) "Full Name (e.g., Mr. Alex)" else "Full Name"
     val icon = if (isTutor) Icons.Rounded.School else Icons.Rounded.Face
 
     AlertDialog(

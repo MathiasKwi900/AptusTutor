@@ -1,9 +1,11 @@
-package com.nexttechtitan.aptustutor.ai
+﻿package com.nexttechtitan.aptustutor.ai
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
@@ -16,7 +18,9 @@ import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import com.nexttechtitan.aptustutor.utils.NotificationHelper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -47,7 +51,7 @@ class ModelDownloadWorker @AssistedInject constructor(
             contentText = "Preparing download..."
         )
 
-        val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ForegroundInfo(notificationId, notification.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             ForegroundInfo(notificationId, notification.build())
@@ -87,22 +91,56 @@ class ModelDownloadWorker @AssistedInject constructor(
         }
     }
 
-    private fun copyFileToPublicDownloads(sourceFile: File) {
-        try {
-            val publicDownloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!publicDownloadsDir.exists()) {
-                publicDownloadsDir.mkdirs()
-            }
-            val destinationFile = File(publicDownloadsDir, MODEL_FILENAME)
+    private suspend fun copyFileToPublicDownloads(sourceFile: File) {
+        // Use withContext to switch to the IO dispatcher for this file operation
+        withContext(Dispatchers.IO) {
+            val resolver = appContext.contentResolver
 
-            FileOutputStream(destinationFile).use { outputStream ->
-                sourceFile.inputStream().use { inputStream ->
-                    inputStream.copyTo(outputStream)
+            // On modern Android, we use MediaStore to save to a public collection.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, MODEL_FILENAME)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream") // Generic byte stream type
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                }
+
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    try {
+                        resolver.openOutputStream(uri)?.use { outputStream ->
+                            sourceFile.inputStream().use { inputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
+                        }
+                        Log.i(TAG, "Successfully copied model to public Downloads folder using MediaStore.")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to copy model to public downloads via MediaStore", e)
+                        // If copy fails, clean up the incomplete MediaStore entry.
+                        resolver.delete(uri, null, null)
+                    }
+                } else {
+                    Log.e(TAG, "MediaStore returned a null URI, cannot save to public downloads.")
+                }
+            } else {
+                // For older devices (API < 29), your original method is acceptable,
+                // but let's make it safer.
+                try {
+                    val publicDownloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    if (!publicDownloadsDir.exists()) {
+                        publicDownloadsDir.mkdirs()
+                    }
+                    val destinationFile = File(publicDownloadsDir, MODEL_FILENAME)
+
+                    FileOutputStream(destinationFile).use { outputStream ->
+                        sourceFile.inputStream().use { inputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                    Log.i(TAG, "Successfully copied model to public Downloads folder (Legacy).")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to copy model to public downloads (Legacy)", e)
                 }
             }
-            Log.i(TAG, "Successfully copied model to public Downloads folder.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to copy model to public downloads", e)
         }
     }
 }

@@ -43,6 +43,7 @@ import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
+import com.nexttechtitan.aptustutor.ui.main.GradingProgressOverlay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
@@ -194,44 +195,35 @@ fun SubmissionDetailsScreen(
                     )
                 }
                 itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
-                    GradedAnswerCard(
-                        questionIndex = index + 1,
-                        question = question,
-                        answer = draftAnswers[question.id],
-                        isFeedbackSent = uiState.feedbackSent,
-                        onScoreChange = { newScore ->
-                            viewModel.onScoreChange(
-                                question.id,
-                                newScore,
-                                question.maxScore
-                            )
-                        },
-                        onFeedbackChange = { newFeedback ->
-                            viewModel.onFeedbackChange(
-                                question.id,
-                                newFeedback
+                    when (question.type) {
+                        QuestionType.MULTIPLE_CHOICE -> {
+                            GradedMcqAnswerCard(
+                                questionIndex = index + 1,
+                                question = question,
+                                answer = draftAnswers[question.id],
+                                isFeedbackSent = uiState.feedbackSent,
+                                onScoreChange = { newScore -> viewModel.onScoreChange(question.id, newScore, question.maxScore) },
+                                onFeedbackChange = { newFeedback -> viewModel.onFeedbackChange(question.id, newFeedback) }
                             )
                         }
-                    )
+                        else -> {
+                            GradedAnswerCard(
+                                questionIndex = index + 1,
+                                question = question,
+                                answer = draftAnswers[question.id],
+                                isFeedbackSent = uiState.feedbackSent,
+                                onScoreChange = { newScore -> viewModel.onScoreChange(question.id, newScore, question.maxScore) },
+                                onFeedbackChange = { newFeedback -> viewModel.onFeedbackChange(question.id, newFeedback) }
+                            )
+                        }
+                    }
                 }
             }
             if (uiState.isGradingEntireSubmission) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
-                        .clickable(enabled = false, onClick = {}),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(64.dp))
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = uiState.gradingProgressText ?: "AI Grading in progress...",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
+                GradingProgressOverlay(
+                    statusText = uiState.gradingProgressText ?: "AI Grading in progress...",
+                    health = uiState.deviceHealth
+                )
             }
         }
     }
@@ -327,6 +319,88 @@ fun SendConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
         confirmButton = { Button(onClick = onConfirm) { Text("Send") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+fun GradedMcqAnswerCard(
+    questionIndex: Int,
+    question: AssessmentQuestion,
+    answer: AssessmentAnswer?,
+    isFeedbackSent: Boolean,
+    onScoreChange: (String) -> Unit,
+    onFeedbackChange: (String) -> Unit
+) {
+    val isReadOnly = isFeedbackSent
+
+    fun getOptionText(indexStr: String?): String {
+        val index = indexStr?.toIntOrNull() ?: return "[Not answered]"
+        if (question.options == null || index !in question.options.indices) {
+            return "[Invalid Answer]"
+        }
+        return "${('A' + index)}. ${question.options[index]}"
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // --- 1. Question & Guide Section ---
+            Column {
+                Text("Question $questionIndex (Multiple Choice)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(question.text, style = MaterialTheme.typography.bodyLarge)
+                Spacer(Modifier.height(12.dp))
+                // Marking guide shows the correct option text
+                Box(
+                    modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceContainer).padding(12.dp)
+                ) {
+                    Column {
+                        Text("Correct Answer", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(4.dp))
+                        Text(getOptionText(question.markingGuide), fontStyle = FontStyle.Italic)
+                    }
+                }
+            }
+
+            // --- 2. Student's Answer Section ---
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("Student's Answer", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    // Student answer also shows the selected option text
+                    Text(getOptionText(answer?.textResponse))
+                }
+            }
+
+            // --- 3. Grading & Feedback Panel ---
+            Column {
+                Text("Grading Panel", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = answer?.feedback ?: "",
+                    onValueChange = onFeedbackChange,
+                    label = { Text("Feedback / Correction") },
+                    readOnly = isReadOnly,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = answer?.score?.toString() ?: "",
+                    onValueChange = onScoreChange,
+                    label = { Text("Score") },
+                    suffix = { Text("/ ${question.maxScore}") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    readOnly = isReadOnly,
+                    modifier = Modifier.fillMaxWidth(0.5f).align(Alignment.End)
+                )
+            }
+        }
+    }
 }
 
 @Composable

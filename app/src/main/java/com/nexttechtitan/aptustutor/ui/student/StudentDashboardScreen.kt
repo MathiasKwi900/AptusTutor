@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
+import com.nexttechtitan.aptustutor.data.Assessment
 import com.nexttechtitan.aptustutor.data.DiscoveredSession
 import com.nexttechtitan.aptustutor.data.SessionHistoryItem
 import com.nexttechtitan.aptustutor.data.StudentDashboardUiState
@@ -88,6 +90,8 @@ fun StudentDashboardScreen(
 
     var showLeaveDialog by remember { mutableStateOf(false) }
     var userWantsToDiscover by remember { mutableStateOf(false) }
+    var sessionForDialog by remember { mutableStateOf<SessionHistoryItem?>(null) }
+
     val requiredPermissions = remember {
         when {
             // Android 13 (API 33) and above
@@ -296,7 +300,8 @@ fun StudentDashboardScreen(
                         HistoryCard(
                             sessionHistoryItem = sessionHistoryItem,
                             onViewResultsClicked = {
-                                navController.navigate("${AptusTutorScreen.SubmissionResult.name}/${sessionHistoryItem.sessionWithDetails.session.sessionId}")
+                                sessionForDialog = sessionHistoryItem
+                                //navController.navigate("${AptusTutorScreen.SubmissionResult.name}/${sessionHistoryItem.sessionWithDetails.session.sessionId}")
                             }
                         )
                         Spacer(Modifier.height(8.dp))
@@ -314,6 +319,22 @@ fun StudentDashboardScreen(
                     userWantsToDiscover = false
                     viewModel.joinSession(session, pin)
                     sessionToJoin = null
+                }
+            )
+        }
+
+        sessionForDialog?.let { item ->
+            val assessments by viewModel.getAssessmentsForSession(item.sessionWithDetails.session.sessionId)
+                .collectAsStateWithLifecycle(initialValue = emptyList())
+
+            AssessmentsDialog(
+                assessments = assessments,
+                onDismiss = { sessionForDialog = null },
+                onAssessmentSelected = { assessmentId ->
+                    sessionForDialog = null
+                    navController.navigate(
+                        "${AptusTutorScreen.SubmissionResult.name}/${item.sessionWithDetails.session.sessionId}/$assessmentId"
+                    )
                 }
             )
         }
@@ -491,8 +512,6 @@ fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: ()
             }
             if (sessionHistoryItem.hasSubmission) {
                 Spacer(Modifier.height(8.dp))
-                // ENHANCEMENT: Using a FilledTonalButton gives this action more weight than an OutlinedButton
-                // without being as loud as a primary Button. Perfect for secondary positive actions.
                 FilledTonalButton(
                     onClick = onViewResultsClicked,
                     modifier = Modifier.align(Alignment.End)
@@ -550,6 +569,38 @@ fun LeaveSessionDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun AssessmentsDialog(
+    assessments: List<Assessment>,
+    onDismiss: () -> Unit,
+    onAssessmentSelected: (assessmentId: String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Select Assessment") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (assessments.isEmpty()) {
+                    item { Text("Loading assessments...") }
+                }
+                items(assessments, key = { it.id }) { assessment ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { onAssessmentSelected(assessment.id) }
+                    ) {
+                        Text(
+                            text = assessment.title,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
     )
 }
 
