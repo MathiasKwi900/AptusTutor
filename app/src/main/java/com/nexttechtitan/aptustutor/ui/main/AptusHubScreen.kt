@@ -1,4 +1,4 @@
-package com.nexttechtitan.aptustutor.ui.tutor
+package com.nexttechtitan.aptustutor.ui.main
 
 import android.Manifest
 import android.content.Context
@@ -170,10 +170,9 @@ fun AiSandboxTab(
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("On-Device AI Sandbox", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "Test the on-device AI grading capabilities by providing a question, marking guide, and a student's answer.\nNote: Performance will depend on your device's capabilities. On low-end devices, it could take several minutes to grade a single task. Improvements are underway",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                ExpandableInfoCard(
+                    title = "How this works",
+                    content = "Test the on-device AI grading capabilities by providing a question, marking guide, and a hypothetical student's answer. Performance depends on your device's capabilities and may be slower on low-end devices. However, improvements are underway."
                 )
             }
         }
@@ -425,11 +424,10 @@ fun StudentAnalyticsTab(viewModel: AptusHubViewModel) {
     ) {
         item(span = { GridItemSpan(2) }) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("A Glimpse into the Future of Tutoring", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "The following capabilities demonstrate how on-device AI will empower an educator, turning classroom-wide data into personalized student insights.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Text("AI-Powered Classroom Insights", style = MaterialTheme.typography.headlineSmall)
+                ExpandableInfoCard(
+                    title = "About this vision",
+                    content = "The following capabilities demonstrate how on-device AI will empower an educator, turning classroom-wide data into personalized student insights."
                 )
             }
         }
@@ -442,6 +440,50 @@ fun StudentAnalyticsTab(viewModel: AptusHubViewModel) {
                     selectedFeature = feature.title
                     viewModel.onFeatureCardTapped(feature.message)
                 }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExpandableInfoCard(
+    title: String,
+    content: String,
+    modifier: Modifier = Modifier
+) {
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f))
+            .clickable { isExpanded = !isExpanded }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.6f)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                imageVector = if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (isExpanded) "Show less" else "Show more",
+                tint = MaterialTheme.colorScheme.secondary
+            )
+        }
+
+        AnimatedVisibility(visible = isExpanded) {
+            Text(
+                text = content,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
             )
         }
     }

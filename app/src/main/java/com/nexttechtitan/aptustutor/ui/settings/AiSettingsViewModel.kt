@@ -106,6 +106,13 @@ class AiSettingsViewModel @Inject constructor(
         )
     }
 
+    fun cancelDownload() {
+        viewModelScope.launch {
+            workManager.cancelUniqueWork(ModelDownloadWorker.WORK_NAME)
+            _toastEvents.emit("Download cancelled.")
+        }
+    }
+
     fun loadModelFromUri(uri: Uri) {
         viewModelScope.launch {
             val fileName = context.contentResolver.getFileName(uri)

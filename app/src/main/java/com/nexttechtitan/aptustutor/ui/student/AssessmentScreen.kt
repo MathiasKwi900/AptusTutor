@@ -111,7 +111,7 @@ fun AssessmentScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium
                 ) {
-                    Text("Submit Assessment", fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Submit Assessment", fontSize = 16.sp, modifier = Modifier.padding(vertical = 4.dp))
                 }
             }
         }
@@ -401,7 +401,7 @@ fun McqQuestionCard(
 }
 
 @Composable
-private fun OrDivider() {
+fun OrDivider() {
     Row(
         modifier = Modifier
             .fillMaxWidth()

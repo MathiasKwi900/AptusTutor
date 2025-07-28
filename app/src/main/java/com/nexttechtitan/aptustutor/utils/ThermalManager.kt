@@ -1,4 +1,4 @@
-package com.nexttechtitan.aptustutor.ai
+package com.nexttechtitan.aptustutor.utils
 
 import android.content.Context
 import android.os.Build

@@ -349,7 +349,10 @@ fun ActiveSessionScreen(
                                 BadgedBox(badge = {
                                     Badge { Text("$assessmentCount") }
                                 }) {
-                                    Text(title, modifier = Modifier.padding(bottom = 8.dp))
+                                    Text(
+                                        text = title,
+                                        modifier = Modifier.padding(end = 12.dp)
+                                    )
                                 }
                             } else {
                                 Text(title)
@@ -384,7 +387,10 @@ fun SessionStatusHeader(
     isNewAssessmentAllowed: Boolean
 ) {
     val activeClass = uiState.activeClass!!.classProfile
-    val rosterSize = uiState.activeClass.students.size
+    val studentsOnRosterIds = uiState.activeClass.students.map { it.studentId }.toSet()
+    val connectedStudentIds = uiState.connectedStudents.map { it.studentId }.toSet()
+    val totalUniqueStudents = (studentsOnRosterIds + connectedStudentIds).size
+
     val connectedCount = uiState.connectedStudents.size
 
     Column(
@@ -406,7 +412,7 @@ fun SessionStatusHeader(
             ) {
                 Text("STUDENTS USE THIS PIN TO JOIN", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(activeClass.classPin, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-                Text("Live Attendance: $connectedCount / $rosterSize", style = MaterialTheme.typography.titleMedium)
+                Text("Live Attendance: $connectedCount / $totalUniqueStudents", style = MaterialTheme.typography.titleMedium)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -800,7 +806,7 @@ fun LazyListScope.assessmentTabContent(
         } else {
             item {
                 Text(
-                    "Sent Assessments",
+                    "Live Assessments",
                     style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.padding(16.dp)
                 )
@@ -884,17 +890,6 @@ fun LazyListScope.assessmentTabContent(
                             Alignment.CenterHorizontally
                         )
                     ) {
-                        // This is the new button
-                        Button(
-                            onClick = { /* Will Grade using Gemma 3n */ },
-                            enabled = hasSubmissionsToGrade
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("Grade All with AI")
-                        }
-
-                        // This is your existing button
                         Button(
                             onClick = onSendAll,
                             enabled = hasPendingFeedback

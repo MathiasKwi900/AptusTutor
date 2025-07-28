@@ -125,4 +125,15 @@ interface AssessmentDao {
 
     @Query("SELECT * FROM assessments WHERE id = :assessmentId")
     fun getAssessmentById(assessmentId: String): Flow<Assessment?>
+
+    @Query("SELECT * FROM assessments WHERE sessionId = :sessionId ORDER BY sentTimestamp DESC")
+    fun getAssessmentsForSession(sessionId: String): Flow<List<Assessment>>
+
+    @Transaction
+    @Query("""
+        SELECT * FROM assessment_submissions
+        WHERE studentId = :studentId AND assessmentId = :assessmentId
+        LIMIT 1
+    """)
+    fun getSubmissionForStudentByAssessment(studentId: String, assessmentId: String): Flow<SubmissionWithAssessment?>
 }

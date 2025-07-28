@@ -27,7 +27,6 @@ import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.RocketLaunch
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SignalCellularAlt
@@ -44,6 +43,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -55,6 +55,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +69,7 @@ import androidx.work.WorkInfo
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
 import com.nexttechtitan.aptustutor.data.ModelStatus
+import com.nexttechtitan.aptustutor.ui.student.OrDivider
 import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +83,7 @@ fun AiSettingsScreen(
     val downloadWorkInfo by viewModel.downloadWorkInfo.collectAsStateWithLifecycle()
     val showMeteredDialog by viewModel.showMeteredNetworkDialog.collectAsStateWithLifecycle()
     val isLoadingFromStorage by viewModel.isLoadingFromStorage.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -342,4 +345,152 @@ private fun MeteredNetworkDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
             TextButton(onClick = onDismiss) { Text("Wait for Wi-Fi") }
         }
     )
+}
+
+// Add this new composable at the bottom of AiSettingsScreen.kt
+
+@Composable
+private fun ModelManagerCard(
+    modifier: Modifier = Modifier,
+    modelStatus: ModelStatus,
+    workInfo: WorkInfo?,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onLoadFromFile: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val downloadState = workInfo?.state
+    val isDownloading = modelStatus == ModelStatus.DOWNLOADING ||
+            downloadState == WorkInfo.State.ENQUEUED ||
+            downloadState == WorkInfo.State.RUNNING
+
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // --- Title ---
+            Text(
+                "AptusTutor AI Model",
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                "Gemma 3N-E2B (INT4 Quantized)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(20.dp))
+
+            // --- State-Driven Content ---
+            when {
+                // STATE 1: DOWNLOADING
+                isDownloading -> {
+                    val progress = workInfo?.progress?.getInt(ModelDownloadWorker.PROGRESS, 0) ?: 0
+                    val animatedProgress by animateFloatAsState(targetValue = progress / 100f, label = "downloadProgress")
+
+                    Text("Downloading Model...", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LinearProgressIndicator(
+                            progress = { animatedProgress },
+                            modifier = Modifier.weight(1f).height(8.dp).clip(CircleShape)
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Text("$progress%", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Button(
+                        onClick = onCancel,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.Error, contentDescription = "Cancel")
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Cancel Download")
+                    }
+                }
+
+                // STATE 2: DOWNLOADED
+                modelStatus == ModelStatus.DOWNLOADED -> {
+                    Icon(
+                        Icons.Rounded.Verified,
+                        contentDescription = "Model Ready",
+                        tint = Color(0xFF34A853),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("Model Ready", style = MaterialTheme.typography.titleMedium, color = Color(0xFF34A853))
+                    Text("AI features are now enabled.", style = MaterialTheme.typography.bodySmall)
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Rounded.Share, contentDescription = "Shareable AI", tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text(
+                            "Shareable AI: After downloading, the model file is also saved to your device's 'Downloads' folder. You can share this file with others to save them data! Once shared, they will simply click Load from Device Storage to load the model.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Button(
+                        onClick = onDelete,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete")
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Delete Model from App")
+                    }
+                }
+
+                // STATE 3: NOT DOWNLOADED (Initial State)
+                else -> {
+                    Icon(
+                        Icons.Rounded.CloudDownload,
+                        contentDescription = "Download Needed",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text("Download Required", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        "Download the model (approx. 3.14 GB) to enable offline AI features.",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(Modifier.height(20.dp))
+
+                    Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.RocketLaunch, contentDescription = null)
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Download from Cloud")
+                    }
+                    OrDivider()
+                    OutlinedButton(onClick = onLoadFromFile, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.FolderOpen, contentDescription = null)
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Load from Device Storage")
+                    }
+                }
+            }
+        }
+    }
 }

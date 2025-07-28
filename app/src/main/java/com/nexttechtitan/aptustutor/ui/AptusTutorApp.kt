@@ -22,8 +22,9 @@ import com.nexttechtitan.aptustutor.ui.student.AssessmentScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardScreen
 import com.nexttechtitan.aptustutor.ui.student.StudentDashboardViewModel
 import com.nexttechtitan.aptustutor.ui.student.SubmissionResultScreen
-import com.nexttechtitan.aptustutor.ui.tutor.AptusHubScreen
+import com.nexttechtitan.aptustutor.ui.main.AptusHubScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SubmissionDetailsScreen
+import com.nexttechtitan.aptustutor.ui.tutor.SubmissionsListScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorDashboardScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorHistoryScreen
 
@@ -37,7 +38,8 @@ enum class AptusTutorScreen {
     SubmissionDetailsScreen,
     SubmissionResult,
     AiSettings,
-    AptusHubScreen
+    AptusHubScreen,
+    SubmissionsList
 }
 
 @Composable
@@ -86,8 +88,8 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
         }
         composable(AptusTutorScreen.TutorHistory.name) {
             TutorHistoryScreen(
-                onNavigateToSubmission = { submissionId ->
-                    navController.navigate("${AptusTutorScreen.SubmissionDetailsScreen.name}/$submissionId")
+                onNavigateToSubmissionsList = { assessmentId ->
+                    navController.navigate("${AptusTutorScreen.SubmissionsList.name}/$assessmentId")
                 },
                 onNavigateBack = { navController.popBackStack() }
             )
@@ -124,8 +126,11 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
             )
         }
         composable(
-            route = "${AptusTutorScreen.SubmissionResult.name}/{sessionId}",
-            arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+            route = "${AptusTutorScreen.SubmissionResult.name}/{sessionId}/{assessmentId}",
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("assessmentId") { type = NavType.StringType }
+            )
         ) {
             SubmissionResultScreen(onNavigateBack = { navController.popBackStack() })
         }
@@ -135,6 +140,18 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
 
         composable(AptusTutorScreen.AptusHubScreen.name) {
             AptusHubScreen(onNavigateBack = { navController.popBackStack() }, navController = navController)
+        }
+
+        composable(
+            route = "${AptusTutorScreen.SubmissionsList.name}/{assessmentId}",
+            arguments = listOf(navArgument("assessmentId") { type = NavType.StringType })
+        ) {
+            SubmissionsListScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onSubmissionClick = { submissionId ->
+                    navController.navigate("${AptusTutorScreen.SubmissionDetailsScreen.name}/$submissionId")
+                }
+            )
         }
     }
 }

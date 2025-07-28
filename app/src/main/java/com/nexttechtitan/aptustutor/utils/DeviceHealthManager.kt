@@ -2,7 +2,7 @@ package com.nexttechtitan.aptustutor.utils
 
 import android.app.ActivityManager
 import android.content.Context
-import com.nexttechtitan.aptustutor.ai.ThermalManager
+import com.nexttechtitan.aptustutor.utils.ThermalManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton

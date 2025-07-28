@@ -1,4 +1,4 @@
-package com.nexttechtitan.aptustutor.ui.tutor
+package com.nexttechtitan.aptustutor.ui.main
 
 import android.graphics.Bitmap
 import androidx.compose.runtime.Immutable
