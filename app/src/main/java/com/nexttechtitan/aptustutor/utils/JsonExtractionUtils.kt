@@ -1,13 +1,10 @@
 package com.nexttechtitan.aptustutor.utils
 
-import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
-import java.lang.Exception
 
-// Using an object for a static utility
+/** A utility for robustly extracting JSON from unstructured LLM text responses. */
 object JsonExtractionUtils {
-    private const val TAG = "AptusTutorDebug"
 
     /**
      * Extracts and validates a JSON object or array string from a larger text block. This function
@@ -47,10 +44,9 @@ object JsonExtractionUtils {
             // Group 1 contains the captured JSON string. Trim it for hygiene.
             val potentialJson = markdownMatch.groupValues[1].trim()
             if (isValidJson(potentialJson)) {
-                Log.d(TAG, "Successfully extracted and validated JSON from markdown block.")
                 return potentialJson
             } else {
-                Log.w(TAG, "Found markdown block, but content was not valid JSON: $potentialJson")
+                //
             }
         }
 
@@ -95,16 +91,12 @@ object JsonExtractionUtils {
             if (endIndex != -1) {
                 val potentialJson = text.substring(startIndex, endIndex + 1)
                 if (isValidJson(potentialJson)) {
-                    Log.d(TAG, "Successfully extracted and validated JSON using fallback logic.")
                     return potentialJson
                 } else {
-                    // This log is crucial for debugging edge cases like braces in strings.
-                    Log.w(TAG, "Fallback extracted a string, but it was not valid JSON: $potentialJson")
+                    //
                 }
             }
         }
-
-        Log.e(TAG, "Failed to find any valid JSON in the response: $text")
         return null
     }
 

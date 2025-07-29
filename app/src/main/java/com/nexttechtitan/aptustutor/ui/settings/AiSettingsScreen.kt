@@ -1,5 +1,6 @@
 package com.nexttechtitan.aptustutor.ui.settings
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -21,10 +22,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DeleteForever
-import androidx.compose.material.icons.rounded.Downloading
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.RocketLaunch
@@ -61,17 +60,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.work.WorkInfo
-import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.ui.student.OrDivider
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
+/**
+ * The user interface for managing the on-device AI model. It allows users to
+ * download the model, load it from a file, see its status, and delete it.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiSettingsScreen(
@@ -79,18 +83,28 @@ fun AiSettingsScreen(
     viewModel: AiSettingsViewModel = hiltViewModel()
 ) {
     val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle(initialValue = ModelStatus.NOT_DOWNLOADED)
-    val gemmaModelState by viewModel.gemmaModelState.collectAsStateWithLifecycle()
     val downloadWorkInfo by viewModel.downloadWorkInfo.collectAsStateWithLifecycle()
     val showMeteredDialog by viewModel.showMeteredNetworkDialog.collectAsStateWithLifecycle()
     val isLoadingFromStorage by viewModel.isLoadingFromStorage.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
+    // A launcher for the system file picker, used to select a local model file.
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { viewModel.loadModelFromUri(it) }
+    ) { uri: Uri? ->
+        uri?.let {
+            val fileName = context.contentResolver.getFileName(it)
+            if (fileName?.endsWith(".task") == true) {
+                viewModel.loadModelFromUri(it)
+            } else {
+                scope.launch {
+                    snackbarHostState.showSnackbar("Invalid file. Please select a .task model file.")
+                }
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -100,6 +114,7 @@ fun AiSettingsScreen(
     }
 
     if (showDeleteDialog) {
+        // Confirmation dialog to prevent accidental model deletion.
         DeleteConfirmationDialog(
             onDismiss = { showDeleteDialog = false },
             onConfirm = {
@@ -110,6 +125,7 @@ fun AiSettingsScreen(
     }
 
     if (showMeteredDialog) {
+        // Confirmation dialog to warn the user before using mobile data for a large download.
         MeteredNetworkDialog(
             onDismiss = { viewModel.dismissMeteredDialog() },
             onConfirm = { viewModel.confirmMeteredDownload() }
@@ -136,22 +152,14 @@ fun AiSettingsScreen(
                     .padding(paddingValues)
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                ModelStatusCard(
+                ModelManagerCard(
                     modelStatus = modelStatus,
-                    gemmaModelState = gemmaModelState,
-                    workInfo = downloadWorkInfo
-                )
-
-                GetModelCard(
-                    modelStatus = modelStatus,
+                    workInfo = downloadWorkInfo,
                     onDownload = { viewModel.onDownloadAction() },
-                    onLoadFromFile = { filePickerLauncher.launch("*/*") }
-                )
-
-                ManageModelCard(
-                    modelStatus = modelStatus,
+                    onCancel = { viewModel.cancelDownload() },
+                    onLoadFromFile = { filePickerLauncher.launch("application/octet-stream") },
                     onDelete = { showDeleteDialog = true }
                 )
             }
@@ -182,173 +190,11 @@ fun AiSettingsScreen(
     }
 }
 
-@Composable
-private fun ModelStatusCard(
-    modelStatus: ModelStatus,
-    gemmaModelState: GemmaAiService.ModelState,
-    workInfo: WorkInfo?
-) {
-    val progress = workInfo?.progress?.getInt(ModelDownloadWorker.PROGRESS, 0)?: 0
-    val animatedProgress by animateFloatAsState(targetValue = progress / 100f, label = "downloadProgress")
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            val (icon, text, color) = when (modelStatus) {
-                ModelStatus.NOT_DOWNLOADED -> Triple(Icons.Rounded.Error, "Model Not Installed", MaterialTheme.colorScheme.error)
-                ModelStatus.DOWNLOADING -> Triple(Icons.Rounded.Downloading, "Downloading Model...", MaterialTheme.colorScheme.primary)
-                ModelStatus.DOWNLOADED -> Triple(Icons.Rounded.CheckCircle, "Model Ready for Use", Color(0xFF34A853))
-            }
-
-            Icon(imageVector = icon, contentDescription = text, tint = color, modifier = Modifier.size(48.dp))
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(text, style = MaterialTheme.typography.titleLarge, color = color)
-
-            if (modelStatus == ModelStatus.DOWNLOADING) {
-                Spacer(modifier = Modifier.height(12.dp))
-                LinearProgressIndicator(
-                    progress = { animatedProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(CircleShape)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("$progress%", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
-private fun GetModelCard(
-    modelStatus: ModelStatus,
-    onDownload: () -> Unit,
-    onLoadFromFile: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Get Model", style = MaterialTheme.typography.titleMedium)
-            HorizontalDivider()
-            Button(
-                onClick = onDownload,
-                enabled = modelStatus == ModelStatus.NOT_DOWNLOADED,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.CloudDownload, contentDescription = null)
-                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                Text("Download from Cloud")
-            }
-            Text(
-                "Download is managed by your device and will continue in the background, even if you close the app. You will see progress in your system notifications.",
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Button(
-                onClick = onLoadFromFile,
-                enabled = modelStatus == ModelStatus.NOT_DOWNLOADED,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.FolderOpen, contentDescription = null)
-                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                Text("Load from Device Storage")
-            }
-        }
-    }
-}
-
-@Composable
-private fun ManageModelCard(
-    modelStatus: ModelStatus,
-    onDelete: () -> Unit
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Manage Model", style = MaterialTheme.typography.titleMedium)
-            HorizontalDivider()
-
-            // Shareable AI Info Box
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.secondaryContainer)
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Icon(Icons.Rounded.Share, contentDescription = "Shareable AI", tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                Text(
-                    "Shareable AI: After downloading, the model file is also saved to your device's 'Downloads' folder. You can share this file with other tutors to save them data!",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-
-            Button(
-                onClick = onDelete,
-                enabled = modelStatus == ModelStatus.DOWNLOADED,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Rounded.DeleteForever, contentDescription = null)
-                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                Text("Delete Model from App")
-            }
-        }
-    }
-}
-
-@Composable
-private fun DeleteConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.Warning, contentDescription = "Warning") },
-        title = { Text("Delete Model?") },
-        text = {
-            Text(
-                "This will remove the AI model from this app's internal storage, disabling AI features until it's loaded again.\n\n" +
-                        "Note: If you downloaded from the cloud, a copy of the model will remain in your device's 'Downloads' folder for sharing."
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-            ) { Text("Delete") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@Composable
-private fun MeteredNetworkDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.SignalCellularAlt, contentDescription = "Warning") },
-        title = { Text("No Wi-Fi Connection") },
-        text = {
-            Text("You are not connected to Wi-Fi. Downloading the AI model (approx. 3.14 GB) will use your mobile data. Do you want to continue?")
-        },
-        confirmButton = {
-            Button(onClick = onConfirm) { Text("Use Mobile Data") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Wait for Wi-Fi") }
-        }
-    )
-}
-
-// Add this new composable at the bottom of AiSettingsScreen.kt
-
+/**
+ * A central, state-driven card that dynamically changes its content based on the
+ * AI model's status (e.g., shows download buttons if not downloaded, progress if
+ * downloading, and delete options if already downloaded). This simplifies the UI logic.
+ */
 @Composable
 private fun ModelManagerCard(
     modifier: Modifier = Modifier,
@@ -369,7 +215,6 @@ private fun ModelManagerCard(
             modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // --- Title ---
             Text(
                 "AptusTutor AI Model",
                 style = MaterialTheme.typography.titleLarge,
@@ -384,7 +229,8 @@ private fun ModelManagerCard(
             HorizontalDivider()
             Spacer(Modifier.height(20.dp))
 
-            // --- State-Driven Content ---
+            // The core of the UI. This 'when' block determines which set of controls to display
+            // based on the model's current state, creating a clear user flow.
             when {
                 // STATE 1: DOWNLOADING
                 isDownloading -> {
@@ -451,7 +297,7 @@ private fun ModelManagerCard(
 
                     Button(
                         onClick = onDelete,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Rounded.DeleteForever, contentDescription = "Delete")
@@ -471,7 +317,7 @@ private fun ModelManagerCard(
                     Spacer(Modifier.height(8.dp))
                     Text("Download Required", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     Text(
-                        "Download the model (approx. 3.14 GB) to enable offline AI features.",
+                        "Download the model (approx. 2.92 GB) to enable offline AI features. This is a one-time download",
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center
                     )
@@ -493,4 +339,46 @@ private fun ModelManagerCard(
             }
         }
     }
+}
+
+@Composable
+private fun DeleteConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Warning, contentDescription = "Warning") },
+        title = { Text("Delete Model?") },
+        text = {
+            Text(
+                "This will remove the AI model from this app's internal storage, disabling AI features until it's loaded again.\n\n" +
+                        "Note: If you downloaded from the cloud, a copy of the model will remain in your device's 'Downloads' folder for sharing."
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text("Delete") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun MeteredNetworkDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.SignalCellularAlt, contentDescription = "Warning") },
+        title = { Text("No Wi-Fi Connection") },
+        text = {
+            Text("You are not connected to Wi-Fi. Downloading the AI model (approx. 2.92 GB) will use your mobile data. Do you want to continue?")
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Use Mobile Data") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Wait for Wi-Fi") }
+        }
+    )
 }

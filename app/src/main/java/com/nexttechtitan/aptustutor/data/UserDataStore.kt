@@ -1,11 +1,9 @@
-// File: data/UserPreferencesRepository.kt
 package com.nexttechtitan.aptustutor.data
 
 import android.content.Context
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -16,15 +14,22 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Provides access to the app's DataStore instance. */
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "aptus_tutor_preferences")
 
+/** Represents the download/availability status of the on-device AI model. */
 enum class ModelStatus {
     NOT_DOWNLOADED, DOWNLOADING, DOWNLOADED
 }
 
+/**
+ * Manages all user-specific settings and preferences using Jetpack DataStore.
+ * This provides a safe, asynchronous, and transactional way to store simple key-value data.
+ */
 @Singleton
 class UserPreferencesRepository @Inject constructor(@ApplicationContext private val context: Context) {
 
+    // Keys for accessing preferences in the DataStore.
     companion object {
         val USER_ROLE_KEY = stringPreferencesKey("user_role")
         val USER_ID_KEY = stringPreferencesKey("user_id")
@@ -34,6 +39,7 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
         val AI_MODEL_PATH_KEY = stringPreferencesKey("ai_model_path")
     }
 
+    // Reactive flows that emit the necessary data whenever it changes.
     val userRoleFlow: Flow<String?> = context.dataStore.data.map { it[USER_ROLE_KEY] }
     val userIdFlow: Flow<String?> = context.dataStore.data.map { it[USER_ID_KEY] }
     val userNameFlow: Flow<String?> = context.dataStore.data.map { it[USER_NAME_KEY] }
@@ -45,6 +51,7 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
         preferences[AI_MODEL_PATH_KEY]
     }
 
+    // Methods to manage specific user data and model status in datastore
     suspend fun setAiModel(status: ModelStatus, path: String? = null) {
         context.dataStore.edit { preferences ->
             preferences[AI_MODEL_STATUS_KEY] = status.name
@@ -56,7 +63,6 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
         }
     }
     suspend fun saveRoleAndDetails(role: String, name: String) {
-        Log.d("UserPreferencesRepo", "Saving role: '$role' and name: '$name'")
         context.dataStore.edit { preferences ->
             val currentId = preferences[USER_ID_KEY]
             if (currentId == null) {
@@ -68,7 +74,6 @@ class UserPreferencesRepository @Inject constructor(@ApplicationContext private 
         }
     }
     suspend fun switchUserRole(newRole: String) {
-        Log.d("UserPreferencesRepo", "Switching user role to: '$newRole'")
         context.dataStore.edit { preferences ->
             preferences[USER_ROLE_KEY] = newRole
         }

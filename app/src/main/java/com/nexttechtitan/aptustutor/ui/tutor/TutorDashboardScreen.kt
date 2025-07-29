@@ -1,41 +1,92 @@
 package com.nexttechtitan.aptustutor.ui.tutor
 
 import android.Manifest
-import android.content.Context
 import android.net.Uri
 import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.rounded.FactCheck
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material.icons.rounded.FactCheck
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.Group
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Podcasts
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Quiz
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
+import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -46,18 +97,24 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import coil.compose.rememberAsyncImagePainter
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import com.google.accompanist.permissions.rememberPermissionState
-import com.nexttechtitan.aptustutor.data.*
+import com.nexttechtitan.aptustutor.data.AssessmentBlueprint
+import com.nexttechtitan.aptustutor.data.AssessmentQuestion
+import com.nexttechtitan.aptustutor.data.ClassWithStudents
+import com.nexttechtitan.aptustutor.data.ConnectedStudent
+import com.nexttechtitan.aptustutor.data.ConnectionRequest
+import com.nexttechtitan.aptustutor.data.QuestionType
+import com.nexttechtitan.aptustutor.data.TutorDashboardUiState
+import com.nexttechtitan.aptustutor.data.VerificationStatus
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
-import com.nexttechtitan.aptustutor.ui.student.ComposeFileProvider
 import kotlinx.coroutines.flow.collectLatest
-import java.io.File
-import java.io.FileOutputStream
 
+/**
+ * The main screen for the Tutor role. It's a state-driven screen that shows either
+ * the [ClassManagementScreen] (when no session is active) or the [ActiveSessionScreen]
+ * (when a session is running).
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun TutorDashboardScreen(
@@ -188,6 +245,8 @@ fun TutorDashboardScreen(
         }
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
+            // This is the core architectural choice of the screen: swapping the entire
+            // content based on whether a session is active.
             if (isSessionActive) {
                 ActiveSessionScreen(
                     uiState = uiState,
@@ -302,6 +361,7 @@ fun ClassManagementScreen(
     }
 }
 
+/** The UI shown when a session is active, containing a TabRow for the live roster and assessments. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActiveSessionScreen(
@@ -363,6 +423,7 @@ fun ActiveSessionScreen(
             }
         }
 
+        // This `when` block switches the content of the LazyColumn based on the selected tab.
         when (selectedTabIndex) {
             0 -> liveRosterTabContent(uiState, onAcceptRequest, onRejectRequest, onAcceptAllRequests, onMarkAbsent)
             1 -> assessmentTabContent(
@@ -622,7 +683,6 @@ fun CreateAssessmentDialog(
     var duration by rememberSaveable { mutableStateOf("10") }
     val questions = remember { mutableStateListOf<AssessmentQuestion>() }
 
-    // Add a default first question
     LaunchedEffect(Unit) {
         if (questions.isEmpty()) {
             questions.add(AssessmentQuestion(text = "", type = QuestionType.TEXT_INPUT, markingGuide = "", maxScore = 10))
@@ -732,6 +792,7 @@ fun QuestionEditor(
     }
 }
 
+/** An extension function on LazyListScope to cleanly define the content for the live roster tab. */
 fun LazyListScope.liveRosterTabContent(
     uiState: TutorDashboardUiState,
     onAcceptRequest: (ConnectionRequest) -> Unit,
@@ -784,6 +845,7 @@ fun LazyListScope.liveRosterTabContent(
     }
 }
 
+/** An extension function on LazyListScope to define the content for the assessments tab. */
 fun LazyListScope.assessmentTabContent(
     uiState: TutorDashboardUiState,
     submissions: List<SubmissionWithStatus>,
@@ -834,7 +896,6 @@ fun LazyListScope.assessmentTabContent(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ADD a back button to return to the list
                 IconButton(onClick = onGoBackToAssessmentList) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to assessments")
                 }
@@ -1031,6 +1092,10 @@ fun AssessmentTypeDialog(
     )
 }
 
+/**
+ * A dialog for creating a new multiple-choice question assessment.
+ * It contains logic for dynamically adding/removing options and questions.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateMcqAssessmentDialog(
@@ -1042,7 +1107,6 @@ fun CreateMcqAssessmentDialog(
     var duration by rememberSaveable { mutableStateOf("10") }
     val questions = remember { mutableStateListOf<AssessmentQuestion>() }
 
-    // Add a default first question
     LaunchedEffect(Unit) {
         if (questions.isEmpty()) {
             questions.add(
@@ -1179,7 +1243,6 @@ fun McqQuestionEditor(
                     )
                     IconButton(onClick = {
                         options.removeAt(index)
-                        // If the removed option was the correct one, reset the selection
                         val newCorrectIndex = if (correctOptionIndex == index) -1 else if (correctOptionIndex > index) correctOptionIndex - 1 else correctOptionIndex
                         onQuestionChange(question.copy(options = options.toList(), markingGuide = newCorrectIndex.toString()))
                     }, enabled = options.size > 2) {
@@ -1244,7 +1307,7 @@ fun McqQuestionEditor(
  // V2 FEATURE: Image-based questions from the tutor are temporarily disabled.
 // The underlying data model still supports `questionImagePath`, but the UI
 // for attaching images is commented out to simplify the initial release.
-// This can be re-enabled when the two-step AI processing for image questions is implemented.
+// This will be re-enabled when the two-step AI processing for image questions is implemented.
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun QuestionEditor(

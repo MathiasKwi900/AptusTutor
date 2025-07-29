@@ -4,6 +4,7 @@ import android.content.Context
 import java.io.File
 import java.io.IOException
 
+/** A utility object for file-related operations. */
 object FileUtils {
 
     /**
@@ -23,7 +24,7 @@ object FileUtils {
         questionId: String
     ): String? {
         return try {
-            // Create a structured directory: files/submissions/[submissionId]/
+            // A structured directory path prevents file name collisions between submissions.
             val submissionDir = File(context.filesDir, "submissions/$submissionId")
             submissionDir.mkdirs() // Create directories if they don't exist
 

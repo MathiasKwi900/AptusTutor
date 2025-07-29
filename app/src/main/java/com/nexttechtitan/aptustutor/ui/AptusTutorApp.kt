@@ -28,6 +28,9 @@ import com.nexttechtitan.aptustutor.ui.tutor.SubmissionsListScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorDashboardScreen
 import com.nexttechtitan.aptustutor.ui.tutor.TutorHistoryScreen
 
+/**
+ * Defines all possible navigation destinations in the app for type-safe routing.
+ */
 enum class AptusTutorScreen {
     Splash,
     RoleSelection,
@@ -42,6 +45,10 @@ enum class AptusTutorScreen {
     SubmissionsList
 }
 
+/**
+ * The main entry point for the app's UI. It sets up the NavHost and orchestrates
+ * navigation between all screens.
+ */
 @Composable
 fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
     val navController = rememberNavController()
@@ -49,19 +56,27 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
         navController = navController,
         startDestination = AptusTutorScreen.Splash.name
     ) {
+
+        // A temporary splash screen. It observes the MainViewModel to determine the
+        // actual start destination, then navigates, removing itself from the back stack.
         composable(AptusTutorScreen.Splash.name) {
             val startDestination by mainViewModel.startDestination.collectAsStateWithLifecycle()
+
+            // This effect runs once the startDestination is determined by the ViewModel.
             LaunchedEffect(startDestination) {
                 if (startDestination != null) {
                     navController.navigate(startDestination!!) {
+                        // Clear the back stack to prevent users from navigating back to the splash screen.
                         popUpTo(AptusTutorScreen.Splash.name) { inclusive = true }
                     }
                 }
             }
+            // Show a loading indicator while the destination is being determined.
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
+        // Onboarding route.
         composable(AptusTutorScreen.RoleSelection.name) {
             RoleSelectionScreen(
                 onOnboardingComplete = { role ->
@@ -70,11 +85,13 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
                         else -> AptusTutorScreen.StudentDashboard.name
                     }
                     navController.navigate(destination) {
+                        // Clear the onboarding flow from the back stack.
                         popUpTo(AptusTutorScreen.RoleSelection.name) { inclusive = true }
                     }
                 }
             )
         }
+        // All composable routes below navigate the the different screens in the app when called
         composable(AptusTutorScreen.TutorDashboard.name) {
             TutorDashboardScreen(
                 onNavigateToSubmission = { submissionId ->
@@ -104,7 +121,8 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
             val studentViewModel: StudentDashboardViewModel = hiltViewModel()
             val uiState by studentViewModel.uiState.collectAsStateWithLifecycle()
 
-            // This effect will navigate to the assessment screen when an assessment starts
+            // A reactive side-effect: if the ViewModel state indicates an active assessment
+            // has been started by the tutor, this navigates the student to the assessment screen automatically.
             LaunchedEffect(uiState.activeAssessment) {
                 if (uiState.activeAssessment != null) {
                     navController.navigate(AptusTutorScreen.AssessmentScreen.name)
@@ -120,7 +138,6 @@ fun AptusTutorApp(mainViewModel: MainViewModel = hiltViewModel()) {
             AssessmentScreen(
                 viewModel = studentViewModel,
                 onNavigateBack = {
-                    // Navigate back to the dashboard after submission
                     navController.popBackStack(AptusTutorScreen.StudentDashboard.name, inclusive = false)
                 }
             )

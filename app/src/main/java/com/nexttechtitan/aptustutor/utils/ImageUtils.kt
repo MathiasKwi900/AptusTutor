@@ -17,7 +17,6 @@ import java.text.DecimalFormat
  */
 object ImageUtils {
 
-    private const val TAG = "AptusTutorDebug"
     private const val MAX_FILE_SIZE_MB = 20
 
     /**
@@ -29,7 +28,6 @@ object ImageUtils {
          * @property byteArray The compressed image data.
          */
         data class Success(val byteArray: ByteArray) : ImageCompressionResult() {
-            // Auto-generated equals and hashCode are fine for data classes
             override fun equals(other: Any?): Boolean {
                 if (this === other) return true
                 if (javaClass != other?.javaClass) return false
@@ -52,7 +50,6 @@ object ImageUtils {
 
     /**
      * Compresses an image from a given URI.
-     *
      * This function decodes the image, optionally downsamples it to fit within the requested
      * dimensions while maintaining aspect ratio, and then compresses it to the specified format and quality.
      * It performs operations on the [Dispatchers.IO] thread.
@@ -66,7 +63,7 @@ object ImageUtils {
      * @return [ImageCompressionResult.Success] containing the compressed byte array,
      *         or [ImageCompressionResult.Error] if compression fails.
      */
-    @JvmStatic // If you need to call this from Java code easily
+    @JvmStatic
     suspend fun compressImage(
         context: Context,
         uri: Uri,
@@ -76,7 +73,6 @@ object ImageUtils {
         targetSizeKb: Int = 500,
         format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG
     ): ImageCompressionResult {
-        Log.d(TAG, "[ImageUtils] Starting compression for URI: $uri")
         return withContext(Dispatchers.IO) {
             var inputStream: InputStream? = null
             var secondInputStream: InputStream? = null
@@ -85,15 +81,12 @@ object ImageUtils {
             try {
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                     val fileSizeInMb = pfd.statSize / (1024 * 1024)
-                    Log.d(TAG, "[ImageUtils] Original file size: ${DecimalFormat("#.##").format(fileSizeInMb)} MB")
                     if (fileSizeInMb > MAX_FILE_SIZE_MB) {
-                        Log.w(TAG, "[ImageUtils] File exceeds max size of $MAX_FILE_SIZE_MB MB. Aborting.")
                         return@withContext ImageCompressionResult.Error(
                             "Image is too large (${DecimalFormat("#.##").format(fileSizeInMb)} MB). Please select a file smaller than $MAX_FILE_SIZE_MB MB."
                         )
                     }
                 }
-                // First pass: get image dimensions without loading into memory
                 inputStream = context.contentResolver.openInputStream(uri)
                     ?: return@withContext ImageCompressionResult.Error("Unable to open InputStream for URI: $uri")
 
@@ -101,7 +94,7 @@ object ImageUtils {
                     inJustDecodeBounds = true
                 }
                 BitmapFactory.decodeStream(inputStream, null, options)
-                inputStream.close() // Close the first stream
+                inputStream.close()
                 inputStream = null
 
                 if (options.outWidth <= 0 || options.outHeight <= 0) {
@@ -109,14 +102,10 @@ object ImageUtils {
                         "Failed to decode image bounds. URI might be invalid or image corrupted: $uri"
                     )
                 }
-                Log.d(TAG, "[ImageUtils] Original dimensions: ${options.outWidth}x${options.outHeight}")
 
-                // Calculate inSampleSize
                 options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
-                Log.d(TAG, "[ImageUtils] Calculated sample size: ${options.inSampleSize}")
                 options.inJustDecodeBounds = false
 
-                // Second pass: decode the bitmap with inSampleSize set
                 secondInputStream = context.contentResolver.openInputStream(uri)
                     ?: return@withContext ImageCompressionResult.Error(
                         "Unable to open InputStream for URI (second pass): $uri"
@@ -125,7 +114,6 @@ object ImageUtils {
                 bitmap = BitmapFactory.decodeStream(secondInputStream, null, options)
                     ?: return@withContext ImageCompressionResult.Error("Failed to decode bitmap from URI: $uri")
 
-                Log.d(TAG, "[ImageUtils] Decoded bitmap with dimensions: ${bitmap.width}x${bitmap.height}")
                 val outputStream = ByteArrayOutputStream()
 
                 var currentQuality = quality
@@ -135,36 +123,25 @@ object ImageUtils {
                     currentQuality -= 10
                     outputStream.reset()
                     bitmap.compress(format, currentQuality, outputStream)
-                    Log.d(TAG, "[ImageUtils] Retrying compression. New quality: $currentQuality, New size: ${outputStream.size() / 1024} KB")
                 }
                 val compressedBytes = outputStream.toByteArray()
-                val finalSizeKb = compressedBytes.size / 1024.0
-                Log.d(TAG, "[ImageUtils] Compression successful. Final quality: $currentQuality, Final size: ${DecimalFormat("#.##").format(finalSizeKb)} KB")
-
                 ImageCompressionResult.Success(compressedBytes)
 
             } catch (e: SecurityException) {
-                Log.e(TAG, "SecurityException compressing image URI: $uri - ${e.message}", e)
                 ImageCompressionResult.Error("Permission denied for URI: $uri", e)
             } catch (e: IOException) {
-                Log.e(TAG, "IOException compressing image URI: $uri - ${e.message}", e)
                 ImageCompressionResult.Error("IO error compressing image: ${e.message}", e)
             } catch (e: OutOfMemoryError) {
-                Log.e(TAG, "OutOfMemoryError compressing image URI: $uri. Image may be too large or device memory low.", e)
-                // Attempt to log more details about memory if possible, or suggest reducing reqWidth/reqHeight
                 ImageCompressionResult.Error("Out of memory while compressing image. Try a smaller image or reduce quality/size.", e)
             } catch (e: Exception) {
-                Log.e(TAG, "Unexpected error compressing image URI: $uri - ${e.message}", e)
                 ImageCompressionResult.Error("An unexpected error occurred: ${e.message}", e)
             } finally {
                 try {
                     inputStream?.close()
                     secondInputStream?.close()
                 } catch (e: IOException) {
-                    Log.w(TAG, "Error closing streams for URI: $uri - ${e.message}", e)
+                    //
                 }
-                // Recycle the bitmap if it was successfully decoded.
-                // It's safe to recycle here as we are returning a byte array, not the bitmap itself.
                 bitmap?.recycle()
             }
         }

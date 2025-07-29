@@ -9,6 +9,10 @@ import androidx.room.Relation
 import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * A "relation" model to fetch a submission along with its parent assessment details.
+ * This is used for display purposes and is not a table in the database.
+ */
 data class SubmissionWithAssessment(
     @Embedded val submission: AssessmentSubmission,
     @Relation(
@@ -18,6 +22,9 @@ data class SubmissionWithAssessment(
     val assessment: Assessment?
 )
 
+/**
+ * Data Access Object for student profile operations.
+ */
 @Dao
 interface StudentProfileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -27,6 +34,9 @@ interface StudentProfileDao {
     fun getStudentById(studentId: String): Flow<StudentProfile?>
 }
 
+/**
+ * Data Access Object for tutor profile operations.
+ */
 @Dao
 interface TutorProfileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -36,6 +46,9 @@ interface TutorProfileDao {
     fun getTutorById(tutorId: String): Flow<TutorProfile?>
 }
 
+/**
+ * Data Access Object for managing classes and student rosters.
+ */
 @Dao
 interface ClassDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -44,15 +57,26 @@ interface ClassDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun addStudentToRoster(roster: ClassRosterCrossRef)
 
+    /**
+     * Retrieves all classes owned by a specific tutor, along with the list of enrolled students.
+     * The @Transaction annotation ensures that fetching the class and its related students
+     * happens as a single, atomic operation.
+     */
     @Transaction
     @Query("SELECT * FROM class_profiles WHERE tutorOwnerId = :tutorId ORDER BY className ASC")
     fun getClassesForTutor(tutorId: String): Flow<List<ClassWithStudents>>
 
+    /**
+     * Retrieves a single class and its full student roster.
+     */
     @Transaction
     @Query("SELECT * FROM class_profiles WHERE classId = :classId")
     fun getClassWithStudents(classId: Long): Flow<ClassWithStudents>
 }
 
+/**
+ * Data Access Object for managing session history and attendance.
+ */
 @Dao
 interface SessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -61,6 +85,10 @@ interface SessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun recordAttendance(attendance: SessionAttendance)
 
+    /**
+     * Fetches the complete session history for a student, including details of the class
+     * for each session they attended. Useful for the student's history screen.
+     */
     @Transaction
     @Query("""
     SELECT * FROM sessions
@@ -85,6 +113,9 @@ interface SessionDao {
     fun getTutorSessionHistory(tutorId: String): Flow<List<SessionWithClassDetails>>
 }
 
+/**
+ * Data Access Object for all operations related to assessments and student submissions.
+ */
 @Dao
 interface AssessmentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -112,6 +143,11 @@ interface AssessmentDao {
     @Query("SELECT * FROM assessment_submissions WHERE submissionId = :submissionId")
     fun getSubmissionFlow(submissionId: String): Flow<AssessmentSubmission?>
 
+    /**
+     * Retrieves a student's submission for a specific assessment within a session,
+     * bundled with the parent assessment details.
+     * @Transaction ensures both the submission and assessment are read atomically.
+     */
     @Transaction
     @Query("""
     SELECT * FROM assessment_submissions

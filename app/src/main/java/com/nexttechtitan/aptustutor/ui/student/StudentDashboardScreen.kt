@@ -2,7 +2,6 @@ package com.nexttechtitan.aptustutor.ui.student
 
 import android.Manifest
 import android.os.Build
-import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.HistoryEdu
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.SignalWifiOff
@@ -33,7 +31,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
@@ -69,19 +66,24 @@ import com.nexttechtitan.aptustutor.data.SessionHistoryItem
 import com.nexttechtitan.aptustutor.data.StudentDashboardUiState
 import com.nexttechtitan.aptustutor.ui.AptusTutorScreen
 import com.nexttechtitan.aptustutor.ui.tutor.SettingsMenu
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
+/**
+ * The main dashboard screen for the student role.
+ * This screen is the central hub for students to find and join classes,
+ * view their connection status, and access their attendance history.
+ * It also handles the complex permission flow required for Nearby Connections.
+ */
 @OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun StudentDashboardScreen(
     viewModel: StudentDashboardViewModel = hiltViewModel(),
     navController: NavHostController
 ) {
-    Log.d("AptusTutorDebug", "==> BRACKET LOG: Recomposing StudentDashboardScreen.")
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val history by viewModel.sessionHistory.collectAsStateWithLifecycle()
     var sessionToJoin by remember { mutableStateOf<DiscoveredSession?>(null) }
@@ -92,9 +94,11 @@ fun StudentDashboardScreen(
     var userWantsToDiscover by remember { mutableStateOf(false) }
     var sessionForDialog by remember { mutableStateOf<SessionHistoryItem?>(null) }
 
+    // This list adapts the required permissions based on the Android API level,
+    // which is necessary for Nearby Connections to function correctly across different OS versions.
     val requiredPermissions = remember {
         when {
-            // Android 13 (API 33) and above
+            // API 33 and above
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -103,7 +107,7 @@ fun StudentDashboardScreen(
                 Manifest.permission.BLUETOOTH_ADVERTISE,
                 Manifest.permission.BLUETOOTH_CONNECT,
             )
-            // Android 12 (API 31 & 32)
+            // API 31 & 32
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
                 Manifest.permission.ACCESS_COARSE_LOCATION,
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -122,6 +126,7 @@ fun StudentDashboardScreen(
         }
     }
 
+    // This effect handles events from the ViewModel, like showing a snackbar.
     LaunchedEffect(key1 = Unit) {
         viewModel.events.collect { message ->
             snackbarHostState.showSnackbar(
@@ -130,6 +135,7 @@ fun StudentDashboardScreen(
             )
         }
     }
+    // This effect handles navigation commands from the ViewModel.
     LaunchedEffect(key1 = Unit) {
         viewModel.navigationEvents.collect { destination ->
             navController.navigate(destination) {
@@ -141,28 +147,21 @@ fun StudentDashboardScreen(
         }
     }
 
+    // This state holder from Accompanist manages the permission request flow.
+    // The lambda block executes *after* the user responds to the permission dialog,
+    // allowing for logic to handle both granted and denied cases.
     val permissionState = rememberMultiplePermissionsState(
         permissions = requiredPermissions
     ) { permissionsResult ->
-        // This callback runs AFTER the user responds to the permission dialog
-        Log.d("PermissionStatus", "Permission results received:")
-        permissionsResult.forEach { (permission, isGranted) ->
-            Log.d("PermissionStatus", "  ${permission}: ${if (isGranted) "GRANTED" else "DENIED"}")
-        }
-
         val allPermissionsGranted = permissionsResult.all { it.value }
-        Log.d("PermissionStatus", "All permissions granted: $allPermissionsGranted")
 
         if (allPermissionsGranted) {
             if (userWantsToDiscover) {
-                Log.d("PermissionStatus", "All permissions granted and user wants to discover. Starting discovery.")
                 viewModel.startDiscovery()
             } else {
-                Log.d("PermissionStatus", "All permissions granted, but user does not currently want to discover.")
+                //
             }
         } else {
-            Log.d("PermissionStatus", "Not all permissions granted. Updating UI and showing Snackbar.")
-            // User denied permissions, update state and show the Snackbar
             userWantsToDiscover = false
             scope.launch {
                 snackbarHostState
@@ -191,7 +190,6 @@ fun StudentDashboardScreen(
             viewModel.errorShown()
         }
     }
-    // --- END OF PRESERVED LOGIC BLOCK ---
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -246,7 +244,6 @@ fun StudentDashboardScreen(
                 }
             }
 
-            // --- NEARBY CLASSES SECTION ---
             item {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
@@ -276,8 +273,6 @@ fun StudentDashboardScreen(
                 }
             }
 
-
-            // --- ATTENDANCE HISTORY SECTION ---
             item {
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
@@ -301,7 +296,6 @@ fun StudentDashboardScreen(
                             sessionHistoryItem = sessionHistoryItem,
                             onViewResultsClicked = {
                                 sessionForDialog = sessionHistoryItem
-                                //navController.navigate("${AptusTutorScreen.SubmissionResult.name}/${sessionHistoryItem.sessionWithDetails.session.sessionId}")
                             }
                         )
                         Spacer(Modifier.height(8.dp))
@@ -310,7 +304,6 @@ fun StudentDashboardScreen(
             }
         }
 
-        // --- DIALOGS (Wired to original logic) ---
         sessionToJoin?.let { session ->
             JoinSessionDialog(
                 session = session,
@@ -326,7 +319,6 @@ fun StudentDashboardScreen(
         sessionForDialog?.let { item ->
             val assessments by viewModel.getAssessmentsForSession(item.sessionWithDetails.session.sessionId)
                 .collectAsStateWithLifecycle(initialValue = emptyList())
-
             AssessmentsDialog(
                 assessments = assessments,
                 onDismiss = { sessionForDialog = null },
@@ -351,34 +343,33 @@ fun StudentDashboardScreen(
     }
 }
 
-
+/**
+ * A card that displays when the student is successfully connected to a tutor's session.
+ * It shows the class name and provides an option to leave the session.
+ */
 @Composable
 private fun ConnectedInfoCard(session: DiscoveredSession, onLeaveClicked: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            // ENHANCEMENT: Reduced vertical padding to make the card more compact.
             .padding(horizontal = 16.dp, vertical = 8.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(
-            // ENHANCEMENT: Rebalanced padding and added Arrangement.spacedBy for consistent, centered spacing.
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // UX FIX: The checkmark icon has been removed to avoid user confusion.
             Text(
                 "Connected to Session",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                // The class name is now the primary headline for clear focus.
                 text = session.className,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
@@ -390,7 +381,6 @@ private fun ConnectedInfoCard(session: DiscoveredSession, onLeaveClicked: () -> 
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onPrimaryContainer
             )
-            // A small spacer adds breathing room before the action button.
             Spacer(Modifier.height(8.dp))
             Button(
                 onClick = onLeaveClicked,
@@ -405,6 +395,10 @@ private fun ConnectedInfoCard(session: DiscoveredSession, onLeaveClicked: () -> 
     }
 }
 
+/**
+ * A card containing the toggle switch that allows a student to start or stop
+ * discovery for nearby tutor sessions.
+ */
 @Composable
 private fun DiscoveryCard(isDiscovering: Boolean, onToggleDiscovery: (Boolean) -> Unit) {
     Card(
@@ -426,7 +420,6 @@ private fun DiscoveryCard(isDiscovering: Boolean, onToggleDiscovery: (Boolean) -
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            // ENHANCEMENT: Themed Switch colors for better brand consistency and visual feedback.
             Switch(
                 checked = isDiscovering,
                 onCheckedChange = onToggleDiscovery,
@@ -485,9 +478,6 @@ fun SessionCard(session: DiscoveredSession, uiState: StudentDashboardUiState, on
 fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: () -> Unit) {
     val formatter = remember { SimpleDateFormat("EEE, d MMM yyyy 'at' hh:mm a", Locale.getDefault()) }
     val sessionDetails = sessionHistoryItem.sessionWithDetails
-    if (sessionDetails.classProfile == null) {
-        Log.e("AptusTutorDebug", "ClassProfile is null for session: ${sessionDetails.session.sessionId}")
-    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -523,6 +513,9 @@ fun HistoryCard(sessionHistoryItem: SessionHistoryItem, onViewResultsClicked: ()
     }
 }
 
+/**
+ * A dialog that prompts the student to enter the 4-digit PIN for a class session.
+ */
 @Composable
 fun JoinSessionDialog(session: DiscoveredSession, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var pin by remember { mutableStateOf("") }
@@ -604,6 +597,10 @@ fun AssessmentsDialog(
     )
 }
 
+/**
+ * A reusable composable for displaying a message when a list is empty,
+ * such as when no nearby classes or no history items are found.
+ */
 @Composable
 fun EmptyState(icon: ImageVector, headline: String, subline: String) {
     Column(

@@ -9,6 +9,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * A utility that wraps Android's `PowerManager` to provide a simplified interface
+ * for checking the device's thermal status. This helps prevent the app from
+ * overheating during intensive AI tasks.
+ */
 @Singleton
 class ThermalManager @Inject constructor(@ApplicationContext private val context: Context) {
 
@@ -34,8 +39,6 @@ class ThermalManager @Inject constructor(@ApplicationContext private val context
         // Check currentThermalStatus (Requires API 29+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val status = powerManager.currentThermalStatus
-            Log.d("AptusTutorDebug", "Current thermal status: $status")
-            // See documentation for status codes: THERMAL_STATUS_MODERATE is 2
             if (status >= PowerManager.THERMAL_STATUS_MODERATE) {
                 return false
             }
@@ -46,7 +49,6 @@ class ThermalManager @Inject constructor(@ApplicationContext private val context
             // getThermalHeadroom(0) gives the current forecast.
             // A value closer to 1.0 means closer to severe throttling.
             val headroom = powerManager.getThermalHeadroom(0)
-            Log.d("AptusTutorDebug", "Current thermal headroom: $headroom")
 
             // NaN indicates the API is not supported or has been called too frequently.
             // Treat unsupported as "safe" to not block functionality.
