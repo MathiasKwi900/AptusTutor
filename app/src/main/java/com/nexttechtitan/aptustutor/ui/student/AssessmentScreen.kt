@@ -12,21 +12,58 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.WarningAmber
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -37,8 +74,6 @@ import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.isGranted
-import com.google.accompanist.permissions.rememberPermissionState
 import com.nexttechtitan.aptustutor.data.QuestionType
 import com.nexttechtitan.aptustutor.data.StudentAssessmentQuestion
 import com.nexttechtitan.aptustutor.utils.FileUtils
@@ -46,6 +81,11 @@ import com.nexttechtitan.aptustutor.utils.ImageUtils
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**
+ * The screen where a student actively takes a timed assessment.
+ * It displays questions one by one and provides input fields for text or image answers.
+ * It also handles the back press to prevent accidental exits.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AssessmentScreen(
@@ -58,22 +98,25 @@ fun AssessmentScreen(
 
     var showExitDialog by remember { mutableStateOf(false) }
 
+    // This effect is critical for the screen's lifecycle. It starts the assessment
+    // timer as soon as assessment data is available from the ViewModel. If the
+    // assessment becomes null (e.g., after submission), it triggers navigation back.
     LaunchedEffect(assessment) {
         if (assessment != null) {
             viewModel.startAssessmentTimer(assessment.durationInMinutes)
         } else {
-            // If assessment becomes null (e.g., after submission), navigate back.
             onNavigateBack()
         }
     }
 
+    // Intercepts the system back button press to show a confirmation dialog,
+    // preventing the student from accidentally losing their progress.
     BackHandler {
         showExitDialog = true
     }
 
     if (assessment == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            // This state is brief, so a simple indicator is fine.
             CircularProgressIndicator()
         }
         return
@@ -155,6 +198,10 @@ fun AssessmentScreen(
     }
 }
 
+/**
+ * A card that displays a single question and provides the appropriate input fields
+ * for a student's answer (e.g., text field, camera button).
+ */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun QuestionCard(
@@ -167,6 +214,9 @@ fun QuestionCard(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // The launcher for the camera activity. The result lambda is crucial:
+    // it compresses the captured image, saves it to a permanent file in app storage,
+    // and then passes the stable URI of that new file to the ViewModel.
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success) {
             tempImageUriHolder?.let { uri ->
@@ -183,7 +233,6 @@ fun QuestionCard(
                                 )
 
                                 if (permanentPath != null) {
-                                    // Pass the reliable, permanent path to the ViewModel.
                                     viewModel.updateImageAnswer(question.id, Uri.fromFile(File(permanentPath)))
                                     "Image captured."
                                 } else {
@@ -193,7 +242,6 @@ fun QuestionCard(
                             is ImageUtils.ImageCompressionResult.Error -> result.message
                         }
                     } catch (e: Exception) {
-                        Log.e("ImageCapture", "Error in camera result", e)
                         "An error occurred while processing the image."
                     }
                     snackbarHostState.showSnackbar(snackbarMessage)
@@ -250,7 +298,6 @@ fun QuestionCard(
                                 contentScale = ContentScale.Fit
                             )
                         } else {
-                            // Show a loading indicator while the image is being received
                             CircularProgressIndicator()
                         }
                     }
@@ -342,6 +389,10 @@ private fun ImageAnswerInput(
     }
 }
 
+/**
+ * A specialized question card for Multiple Choice Questions, using radio buttons
+ * for a clear and intuitive selection experience.
+ */
 @Composable
 fun McqQuestionCard(
     questionNumber: Int,
@@ -364,7 +415,6 @@ fun McqQuestionCard(
             Text(question.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
             Spacer(Modifier.height(16.dp))
 
-            // Multiple Choice Options
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 question.options?.forEachIndexed { index, optionText ->
                     val isSelected = selectedOptionIndex == index
@@ -415,6 +465,10 @@ fun OrDivider() {
     }
 }
 
+/**
+ * A confirmation dialog shown when the user tries to exit the assessment,
+ * ensuring they understand that leaving will auto-submit their work.
+ */
 @Composable
 private fun ExitConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
@@ -440,6 +494,11 @@ private fun formatTime(seconds: Int): String {
     return "%02d:%02d".format(minutes, remainingSeconds)
 }
 
+/**
+ * A utility object that uses a FileProvider to create a content URI for the camera.
+ * This is the standard, secure way to allow the camera app to write an image to a
+ * file that our app can then read.
+ */
 object ComposeFileProvider {
     fun getImageUri(context: Context): Uri {
         val directory = File(context.cacheDir, "images")

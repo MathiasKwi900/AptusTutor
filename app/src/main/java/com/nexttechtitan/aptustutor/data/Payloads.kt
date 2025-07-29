@@ -2,8 +2,10 @@ package com.nexttechtitan.aptustutor.data
 
 import java.util.UUID
 
-// Payloads for Nearby Connections
+/** A data payload sent from tutor to student containing core session info after connection approval. */
 data class SessionAdvertisementPayload(val sessionId: String, val tutorName: String, val className: String)
+
+/** A data payload sent from student to tutor to initiate a connection, containing their PIN for verification. */
 data class ConnectionRequestPayload(val studentId: String, val studentName: String, val classPin: String)
 
 data class StudentAssessmentQuestion(
@@ -24,7 +26,6 @@ data class AssessmentBlueprint(
     val sentTimestamp: Long = System.currentTimeMillis()
 )
 
-// The assessment payload sent to the student
 data class AssessmentForStudent(
     val id: String,
     val sessionId: String,
@@ -34,16 +35,23 @@ data class AssessmentForStudent(
     val sentTimestamp: Long
 )
 
-// A generic wrapper for all messages sent via BYTES payload
+/**
+ * A generic wrapper for all BYTES payloads. This standardizes communication, allowing
+ * the receiver to first parse the `type` to determine how to handle the `jsonData`.
+ */
 data class PayloadWrapper(
     val type: String, // e.g., "START_ASSESSMENT", "SUBMISSION_METADATA"
     val jsonData: String
 )
 
+/**
+ * A JSON header embedded at the start of a FILE payload. It provides context for the
+ * raw file data that follows, linking it to a specific session, question, and/or submission.
+ */
 data class EmbeddedFileHeader(
     val sessionId: String,
     val questionId: String,
-    val submissionId: String? = null
+    val submissionId: String? = null // Null for question images, non-null for answer images
 )
 
 data class SessionEndPayload(
@@ -52,6 +60,7 @@ data class SessionEndPayload(
     val attendance: SessionAttendance
 )
 
+/** The payload containing a student's final graded submission and attendance record from the tutor. */
 data class GradedFeedbackPayload(
     val submission: AssessmentSubmission,
     val attendanceRecord: SessionAttendance,
@@ -59,6 +68,7 @@ data class GradedFeedbackPayload(
     val classProfile: ClassProfile
 )
 
+/** A payload sent from the student back to the tutor to confirm receipt of graded feedback. */
 data class FeedbackAckPayload( // "Ack" is short for "Acknowledgement"
     val submissionId: String
 )

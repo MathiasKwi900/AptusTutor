@@ -12,11 +12,20 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Main ViewModel for the application.
+ * Its primary responsibility is to determine the correct starting screen for the user
+ * based on their onboarding status and role (Tutor/Student). This prevents flashes of
+ * incorrect screens on app startup.
+ */
+
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
+    // Holds the determined start route. The UI observes this to navigate.
+    // It's null initially, allowing the splash screen to remain visible.
     private val _startDestination = MutableStateFlow<String?>(null)
     val startDestination: StateFlow<String?> = _startDestination.asStateFlow()
 
@@ -24,6 +33,11 @@ class MainViewModel @Inject constructor(
         determineStartDestination()
     }
 
+    /**
+     * Checks user preferences to decide the navigation starting point.
+     * - If onboarding is not complete, directs to RoleSelectionScreen.
+     * - If complete, directs to the appropriate dashboard based on the saved user role.
+     */
     private fun determineStartDestination() {
         viewModelScope.launch {
             val isOnboardingComplete = userPreferencesRepository.onboardingCompleteFlow.first()

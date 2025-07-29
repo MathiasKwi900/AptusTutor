@@ -11,6 +11,10 @@ import com.nexttechtitan.aptustutor.ui.main.MainViewModel
 import com.nexttechtitan.aptustutor.ui.theme.AptusTutorTheme
 import dagger.hilt.android.AndroidEntryPoint
 
+/**
+ * The main and only Activity in the app, following a single-activity architecture.
+ * It hosts the Jetpack Compose content and initializes the core app structure.
+ */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
@@ -19,6 +23,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Configures the native splash screen. It will remain on screen
+        // until the MainViewModel determines the correct start destination.
+        // This creates a seamless transition from app launch to the first screen.
         installSplashScreen().setKeepOnScreenCondition {
             mainViewModel.startDestination.value == null
         }

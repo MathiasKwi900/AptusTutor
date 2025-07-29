@@ -1,4 +1,3 @@
-// File: data/DataModels.kt
 package com.nexttechtitan.aptustutor.data
 
 import androidx.room.Embedded
@@ -14,12 +13,12 @@ import com.google.gson.reflect.TypeToken
 import java.util.UUID
 
 /**
- * Represents a unique user with the role of a student.
- * Stored on BOTH tutor and student devices.
+ * Represents a student user. A copy of this profile is stored on both the tutor's
+ * device (in a class roster) and the student's own device.
  */
 @Entity(tableName = "student_profiles")
 data class StudentProfile(
-    @PrimaryKey val studentId: String, // A unique, self-generated ID
+    @PrimaryKey val studentId: String, // A unique, auto-generated ID for each student
     val name: String
 )
 
@@ -28,7 +27,7 @@ data class StudentProfile(
  */
 @Entity(tableName = "tutor_profiles")
 data class TutorProfile(
-    @PrimaryKey val tutorId: String, // A unique, self-generated ID
+    @PrimaryKey val tutorId: String, // A unique, auto-generated ID for a tutor
     val name: String
 )
 
@@ -48,8 +47,8 @@ data class ClassProfile(
 )
 
 /**
- * A joining table to create a many-to-many relationship
- * between classes and students (the class roster).
+ * A joining table to create the many-to-many relationship between ClassProfile
+ * and StudentProfile, forming the class roster.
  */
 @Entity(primaryKeys = ["classId", "studentId"])
 data class ClassRosterCrossRef(
@@ -58,8 +57,8 @@ data class ClassRosterCrossRef(
 )
 
 /**
- * Represents a specific class with its roster of students.
- * This is a "relation" model for querying, not a table itself.
+ * A "relation" model for querying. It combines a ClassProfile with its list of
+ * associated StudentProfile entities. This is not a table in the database.
  */
 data class ClassWithStudents(
     @Embedded val classProfile: ClassProfile,
@@ -113,6 +112,10 @@ data class SessionAttendance(
     val status: String
 )
 
+/**
+ * Represents a single assessment, including grading info.
+ * The `questions` list in the Assessment entity is stored as a JSON string.
+ */
 @Entity(tableName = "assessments")
 @TypeConverters(Converters::class)
 data class Assessment(
@@ -124,6 +127,10 @@ data class Assessment(
     val sentTimestamp: Long
 )
 
+/**
+ * Represents a student's complete submission for an assessment.
+ * This entity is created on the student's device and transferred to the tutor.
+ */
 @Entity(tableName = "assessment_submissions")
 @TypeConverters(Converters::class)
 data class AssessmentSubmission(
@@ -136,6 +143,11 @@ data class AssessmentSubmission(
     val feedbackStatus: FeedbackStatus = FeedbackStatus.PENDING_SEND
 )
 
+/**
+ * Provides functions to convert complex types (like Lists) into primitives that Room
+ * can store (e.g., JSON strings). This is necessary because Room doesn't natively
+ * support storing lists of custom objects.
+ */
 class Converters {
     @TypeConverter
     fun fromQuestionList(value: List<AssessmentQuestion>?): String = Gson().toJson(value)

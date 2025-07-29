@@ -13,7 +13,6 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import com.nexttechtitan.aptustutor.ai.GemmaAiService
 import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
@@ -36,17 +35,23 @@ import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
 
+/**
+ * ViewModel for the AI Settings screen.
+ * Manages the lifecycle of the on-device AI model, including:
+ * - Initiating downloads via WorkManager.
+ * - Observing download progress.
+ * - Loading a model from local device storage.
+ * - Deleting the model.
+ */
 @HiltViewModel
 class AiSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val userPreferencesRepo: UserPreferencesRepository,
     private val workManager: WorkManager,
-    private val gemmaAiService: GemmaAiService,
     private val networkUtils: NetworkUtils
 ) : ViewModel() {
 
     val modelStatus = userPreferencesRepo.aiModelStatusFlow
-    val gemmaModelState = gemmaAiService.modelState
 
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
@@ -57,21 +62,26 @@ class AiSettingsViewModel @Inject constructor(
     private val _showMeteredNetworkDialog = MutableStateFlow(false)
     val showMeteredNetworkDialog = _showMeteredNetworkDialog.asStateFlow()
 
-
+    /**
+     * A flow that observes the state of the [ModelDownloadWorker] from WorkManager.
+     * This allows the UI to reactively display download progress and status.
+     */
     val downloadWorkInfo: StateFlow<WorkInfo?> =
         workManager.getWorkInfosForUniqueWorkLiveData(ModelDownloadWorker.WORK_NAME)
             .asFlow()
             .map { it.firstOrNull() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /**
+     * Handles the user's "Download" action. It checks the network state and either
+     * starts the download (on Wi-Fi) or prompts the user for confirmation (on mobile data).
+     */
     fun onDownloadAction() {
         viewModelScope.launch {
             if (networkUtils.isWifiConnected()) {
-                // If on Wi-Fi, start immediately.
                 startDownload(useMeteredNetwork = false)
                 _toastEvents.emit("Download scheduled. Will begin on Wi-Fi.")
             } else {
-                // If not on Wi-Fi, show the confirmation dialog.
                 _showMeteredNetworkDialog.value = true
             }
         }
@@ -89,6 +99,10 @@ class AiSettingsViewModel @Inject constructor(
         _showMeteredNetworkDialog.value = false
     }
 
+    /**
+     * Configures and enqueues the background download task using WorkManager, applying
+     * the appropriate network constraints based on user choice.
+     */
     private fun startDownload(useMeteredNetwork: Boolean) {
         val networkType = if (useMeteredNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED
         val constraints = Constraints.Builder()
@@ -113,6 +127,11 @@ class AiSettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Loads a model from a user-selected URI. This function performs the I/O-intensive
+     * task of copying the file to the app's private directory and then updates the
+     * app's preferences to reflect the new model state.
+     */
     fun loadModelFromUri(uri: Uri) {
         viewModelScope.launch {
             val fileName = context.contentResolver.getFileName(uri)
@@ -141,6 +160,10 @@ class AiSettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Deletes the AI model from internal storage and resets all related user preferences,
+     * effectively returning the app to a pre-download state.
+     */
     fun deleteModel() {
         viewModelScope.launch {
             val modelPath = userPreferencesRepo.aiModelPathFlow.first()
@@ -150,13 +173,16 @@ class AiSettingsViewModel @Inject constructor(
                     file.delete()
                 }
             }
-            // Reset preferences and release the model from memory
             userPreferencesRepo.setAiModel(ModelStatus.NOT_DOWNLOADED)
             _toastEvents.emit("Model removed from app storage.")
         }
     }
 }
 
+/**
+ * An extension function to safely retrieve a display name from a content URI,
+ * which is not directly available from the URI object itself.
+ */
 fun ContentResolver.getFileName(uri: Uri): String? {
     var name: String? = null
     val cursor = query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)

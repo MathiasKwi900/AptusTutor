@@ -2,7 +2,7 @@ package com.nexttechtitan.aptustutor.data
 
 import java.util.UUID
 
-// Represents a session a student can see and request to join
+/** Represents a tutor's session discovered by a student on the network. */
 data class DiscoveredSession(
     val endpointId: String,
     val sessionId: String,
@@ -10,7 +10,7 @@ data class DiscoveredSession(
     val className: String
 )
 
-// Represents a student's request to join, as seen by the tutor
+/** Represents a student's request to join a session, as displayed on the tutor's screen. */
 data class ConnectionRequest(
     val endpointId: String,
     val studentId: String,
@@ -18,21 +18,24 @@ data class ConnectionRequest(
     val status: VerificationStatus
 )
 
-// Represents a student currently in the tutor's active session
+
 data class ConnectedStudent(
     val endpointId: String,
     val studentId: String,
     val name: String
 )
 
+/** The verification status of a student's connection request. */
 enum class VerificationStatus {
     PENDING_APPROVAL, // For students already on the roster
     PIN_VERIFIED_PENDING_APPROVAL, // For new students who passed the PIN check
     REJECTED // For students with the wrong PIN
 }
 
-// --- Main UI State Holders ---
-
+/**
+ * A single, immutable object representing the entire state of the Tutor's dashboard.
+ * Using a single state object makes state management predictable and easier to debug.
+ */
 data class TutorDashboardUiState(
     val isAdvertising: Boolean = false,
     val activeSession: Session? = null,
@@ -45,6 +48,9 @@ data class TutorDashboardUiState(
     val error: String? = null
 )
 
+/**
+ * A single, immutable object representing the entire state of the Student's dashboard.
+ */
 data class StudentDashboardUiState(
     val isDiscovering: Boolean = false,
     val discoveredSessions: List<DiscoveredSession> = emptyList(),
@@ -55,7 +61,6 @@ data class StudentDashboardUiState(
     val error: String? = null
 )
 
-// The definition of a single question
 data class AssessmentQuestion(
     val id: String = UUID.randomUUID().toString(),
     val text: String,
@@ -72,13 +77,13 @@ enum class QuestionType {
     MULTIPLE_CHOICE
 }
 
+/** The delivery status of feedback sent from a tutor to a student. */
 enum class FeedbackStatus {
-    PENDING_SEND,
-    SENT_PENDING_ACK,
-    DELIVERED
+    PENDING_SEND, // Graded by tutor, but not yet sent (e.g., student was offline).
+    SENT_PENDING_ACK, // Sent to student, awaiting confirmation of receipt.
+    DELIVERED // Student has confirmed receipt.
 }
 
-// A student's answer to a single question
 data class AssessmentAnswer(
     val questionId: String,
     val textResponse: String? = null,

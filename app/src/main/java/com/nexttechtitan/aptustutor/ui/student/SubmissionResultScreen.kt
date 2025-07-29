@@ -44,6 +44,11 @@ import com.nexttechtitan.aptustutor.data.AssessmentQuestion
 import com.nexttechtitan.aptustutor.data.QuestionType
 import java.io.File
 
+/**
+ * Displays the detailed results of a completed and graded assessment.
+ * It breaks down the submission question by question, showing the student's answer,
+ * the score awarded, and any feedback provided by the AI or tutor.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubmissionResultScreen(
@@ -118,6 +123,10 @@ fun SubmissionResultScreen(
     }
 }
 
+/**
+ * A card that renders the result for a single question, including the question text,
+ * the student's original answer (text or image), the score, and tutor feedback.
+ */
 @Composable
 fun ResultAnswerCard(
     questionIndex: Int,
@@ -126,7 +135,6 @@ fun ResultAnswerCard(
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
-            // --- Question ---
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Text("Question $questionIndex", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("${question.maxScore} marks", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -135,7 +143,6 @@ fun ResultAnswerCard(
             Text(question.text)
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
-            // --- Your Answer ---
             Text("Your Answer:", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
 
@@ -165,7 +172,6 @@ fun ResultAnswerCard(
                 }
             }
 
-            // --- Grade & Feedback ---
             HorizontalDivider(Modifier.padding(vertical = 16.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),

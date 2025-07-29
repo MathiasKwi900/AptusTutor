@@ -2,8 +2,8 @@ package com.nexttechtitan.aptustutor.ui.main
 
 import android.Manifest
 import android.content.Context
-import android.graphics.Bitmap
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -19,7 +19,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -34,9 +46,55 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.Cancel
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.EventBusy
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.ModelTraining
+import androidx.compose.material.icons.rounded.PhotoCamera
+import androidx.compose.material.icons.rounded.PsychologyAlt
+import androidx.compose.material.icons.rounded.Quiz
+import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.SentimentSatisfied
+import androidx.compose.material.icons.rounded.Thermostat
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +122,11 @@ import com.nexttechtitan.aptustutor.utils.ImageUtils
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**
+ * The main UI screen for the Aptus Hub, which serves as a central point for AI-driven
+ * features. It contains two tabs: an "AI Sandbox" for testing the grading model and
+ * a "Class Analytics" tab to showcase the future vision of the project.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AptusHubScreen(
@@ -74,13 +137,13 @@ fun AptusHubScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle()
     val isAiReady = modelStatus == ModelStatus.DOWNLOADED
-
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    // RENAMED TABS
     val tabs = listOf("AI Sandbox", "Class Analytics")
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // This LaunchedEffect subscribes to the ViewModel's event flow. It's the standard
+    // way to handle one-off events like showing a snackbar in response to a ViewModel action.
     LaunchedEffect(key1 = Unit) {
         viewModel.toastEvents.collect { message ->
             snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Long)
@@ -110,7 +173,6 @@ fun AptusHubScreen(
                             text = { Text(title) },
                             icon = {
                                 when (index) {
-                                    // UPDATED ICONS
                                     0 -> Icon(Icons.Rounded.Science, contentDescription = null)
                                     1 -> Icon(Icons.Rounded.Insights, contentDescription = null)
                                 }
@@ -119,7 +181,7 @@ fun AptusHubScreen(
                     }
                 }
                 when (selectedTabIndex) {
-                    0 -> AiSandboxTab( // RENAMED
+                    0 -> AiSandboxTab(
                         uiState = uiState,
                         isAiReady = isAiReady,
                         viewModel = viewModel,
@@ -154,7 +216,10 @@ fun AptusHubScreen(
     }
 }
 
-// RENAMED Composable
+/**
+ * The UI for the AI Sandbox, allowing a user to input a question, marking guide, and
+ * student answer to test the on-device Gemma model's grading capability directly.
+ */
 @Composable
 fun AiSandboxTab(
     uiState: AptusHubUiState,
@@ -247,6 +312,10 @@ fun AiSandboxTab(
     }
 }
 
+/**
+ * The UI for inputting a student's answer, supporting both typed text and an
+ * image from the camera or gallery. It handles image compression and permission requests.
+ */
 @Composable
 fun StudentAnswerInput(
     answerText: String,
@@ -259,6 +328,8 @@ fun StudentAnswerInput(
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // This lambda compresses the selected image before setting it in the ViewModel's state.
+    // This is a crucial optimization to reduce memory usage before passing the bitmap to the AI model.
     val processImageUri: (Uri?) -> Unit = { uri ->
         uri?.let {
             scope.launch {
@@ -275,6 +346,7 @@ fun StudentAnswerInput(
         }
     }
 
+    // Standard Compose launchers for handling activity results (gallery, camera, permissions).
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? -> processImageUri(uri) }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success -> if (success) processImageUri(tempCameraUri) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -366,6 +438,10 @@ private data class AnalyticsFeature(
     val message: String
 )
 
+/**
+ * A UI to showcase the vision for future AI-powered analytics. Each feature is represented
+ * by a card that, when tapped, displays an explanatory message.
+ */
 @Composable
 fun StudentAnalyticsTab(viewModel: AptusHubViewModel) {
     val features = remember {
@@ -508,7 +584,7 @@ private fun FeatureCard(
     Card(
         onClick = onClick,
         modifier = Modifier
-            .aspectRatio(1f) // Makes the card a square
+            .aspectRatio(1f)
             .scale(targetScale),
         colors = CardDefaults.cardColors(
             containerColor = animatedContainerColor,
@@ -548,7 +624,6 @@ fun GradedItemCard(item: GradedItem) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primaryContainer)
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Question and Answer Section
             Text("Submission Details", style = MaterialTheme.typography.titleMedium)
             TextItem(icon = Icons.AutoMirrored.Rounded.HelpOutline, label = "Question", value = item.questionText)
             if (item.studentAnswerText.isNotBlank()) {
@@ -573,7 +648,6 @@ fun GradedItemCard(item: GradedItem) {
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            // AI Result Section
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Rounded.CheckCircle, contentDescription = "Graded", tint = MaterialTheme.colorScheme.primary)
                 Text("AI Grade & Feedback", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -619,6 +693,10 @@ fun ScoreIndicator(score: Int) {
     }
 }
 
+/**
+ * A modal overlay that blocks the UI and shows progress during a grading operation.
+ * It provides users with real-time status text and device health metrics.
+ */
 @Composable
 fun GradingProgressOverlay(statusText: String, health: CapabilityResult?) {
     Box(
@@ -657,14 +735,18 @@ fun GradingProgressOverlay(statusText: String, health: CapabilityResult?) {
     }
 }
 
+/**
+ * A composable that visualizes the device's real-time capability (RAM, thermal headroom).
+ * This provides transparency to the user, explaining why performance might vary.
+ */
 @Composable
 fun DeviceHealthMonitor(health: CapabilityResult?) {
     if (health == null) return
 
     val statusColor = when (health.capability) {
-        DeviceCapability.CAPABLE -> Color(0xFF388E3C) // Green
-        DeviceCapability.LIMITED -> Color(0xFFF57C00) // Orange
-        DeviceCapability.UNSUPPORTED -> Color(0xFFD32F2F) // Red
+        DeviceCapability.CAPABLE -> Color(0xFF388E3C)
+        DeviceCapability.LIMITED -> Color(0xFFF57C00)
+        DeviceCapability.UNSUPPORTED -> Color(0xFFD32F2F)
     }
 
     val animatedColor by animateColorAsState(targetValue = statusColor, animationSpec = tween(500), label = "statusColor")
@@ -701,7 +783,6 @@ fun DeviceHealthMonitor(health: CapabilityResult?) {
 
             HorizontalDivider(color = Color.White.copy(alpha = 0.3f))
 
-            // Display the primary reason for the status
             Text(
                 text = health.message,
                 style = MaterialTheme.typography.bodySmall,
@@ -710,7 +791,6 @@ fun DeviceHealthMonitor(health: CapabilityResult?) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // Display detailed metrics
             HealthMetricRow(
                 icon = Icons.Rounded.Memory,
                 label = "Available RAM",
@@ -744,6 +824,11 @@ fun HealthMetricRow(icon: ImageVector, label: String, value: String) {
     }
 }
 
+/**
+ * A utility object that uses a FileProvider to create a content URI. This is the modern,
+ * secure way to provide a location for the camera app to save a captured image,
+ * ensuring it's accessible to our app without requiring broad storage permissions.
+ */
 private object AiTestComposeFileProvider {
     fun getImageUri(context: Context): Uri {
         val directory = File(context.cacheDir, "images")

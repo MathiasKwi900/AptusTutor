@@ -18,11 +18,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 
+/**
+ * The first screen new users see. It allows them to select their role (Tutor or Student)
+ * and enter their name, completing the onboarding process.
+ *
+ * @param onOnboardingComplete Callback that fires when the role and name have been saved,
+ * providing the selected role to navigate to the correct dashboard.
+ */
 @Composable
 fun RoleSelectionScreen(
     onOnboardingComplete: (String) -> Unit,
     viewModel: RoleSelectionViewModel = hiltViewModel()
 ) {
+    // State to track the user's selection and control the UI.
     var selectedRole by remember { mutableStateOf<String?>(null) }
     var showDetailsDialog by remember { mutableStateOf(false) }
 
@@ -53,6 +61,7 @@ fun RoleSelectionScreen(
         }
     }
 
+    // When a role is selected and the user clicks Get Started, we show a dialog to get their name.
     if (showDetailsDialog && selectedRole != null) {
         UserDetailsDialog(
             role = selectedRole!!,
@@ -176,6 +185,9 @@ private fun GetStartedButton(isVisible: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * A dialog to capture the user's name after they have selected a role.
+ */
 @Composable
 private fun UserDetailsDialog(
     role: String,

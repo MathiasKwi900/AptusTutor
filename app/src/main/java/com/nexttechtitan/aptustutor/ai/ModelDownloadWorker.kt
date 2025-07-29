@@ -6,7 +6,6 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -24,8 +23,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
-private const val TAG = "ModelDownloadWorker"
-
+/**
+ * A background worker responsible for downloading the large AI model file from
+ * Firebase Storage. It runs as a foreground service to ensure the download is not
+ * killed by the OS, provides progress updates via its WorkInfo, and shows a
+ * user-facing notification.
+ */
 @HiltWorker
 class ModelDownloadWorker @AssistedInject constructor(
     @Assisted private val appContext: Context,
@@ -76,14 +79,12 @@ class ModelDownloadWorker @AssistedInject constructor(
                 notificationHelper.notify(notificationId, progressNotification)
             }.await()
 
-            Log.i(TAG, "Model download to private storage successful.")
             copyFileToPublicDownloads(privateFile)
             notificationHelper.showDownloadCompleteNotification(notificationId, "AI Model Ready", "The AptusTutor model has been downloaded.")
 
             userPreferencesRepo.setAiModel(ModelStatus.DOWNLOADED, privateFile.absolutePath)
             Result.success()
         } catch (e: Exception) {
-            Log.e(TAG, "Model download failed", e)
             notificationHelper.showDownloadCompleteNotification(notificationId, "Download Failed", "Could not download the AI model.")
             userPreferencesRepo.setAiModel(ModelStatus.NOT_DOWNLOADED)
             privateFile.delete()
@@ -91,8 +92,12 @@ class ModelDownloadWorker @AssistedInject constructor(
         }
     }
 
+    /**
+     * Copies the downloaded model from the app's private storage to the public
+     * 'Downloads' directory. This uses the modern MediaStore API for Android Q+
+     * for better system integration and security.
+     */
     private suspend fun copyFileToPublicDownloads(sourceFile: File) {
-        // Use withContext to switch to the IO dispatcher for this file operation
         withContext(Dispatchers.IO) {
             val resolver = appContext.contentResolver
 
@@ -100,7 +105,7 @@ class ModelDownloadWorker @AssistedInject constructor(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, MODEL_FILENAME)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream") // Generic byte stream type
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
                     put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                 }
 
@@ -112,18 +117,14 @@ class ModelDownloadWorker @AssistedInject constructor(
                                 inputStream.copyTo(outputStream)
                             }
                         }
-                        Log.i(TAG, "Successfully copied model to public Downloads folder using MediaStore.")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to copy model to public downloads via MediaStore", e)
-                        // If copy fails, clean up the incomplete MediaStore entry.
                         resolver.delete(uri, null, null)
                     }
                 } else {
-                    Log.e(TAG, "MediaStore returned a null URI, cannot save to public downloads.")
+                    //
                 }
             } else {
-                // For older devices (API < 29), your original method is acceptable,
-                // but let's make it safer.
+                // This acts as a fallback for older devices (API < 29)
                 try {
                     val publicDownloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                     if (!publicDownloadsDir.exists()) {
@@ -136,9 +137,8 @@ class ModelDownloadWorker @AssistedInject constructor(
                             inputStream.copyTo(outputStream)
                         }
                     }
-                    Log.i(TAG, "Successfully copied model to public Downloads folder (Legacy).")
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to copy model to public downloads (Legacy)", e)
+                    //
                 }
             }
         }

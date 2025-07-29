@@ -2,13 +2,11 @@ package com.nexttechtitan.aptustutor.ui.tutor
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nexttechtitan.aptustutor.ai.AiGradeResponse
 import com.nexttechtitan.aptustutor.ai.GemmaAiService
-import com.nexttechtitan.aptustutor.utils.ThermalManager
 import com.nexttechtitan.aptustutor.data.AptusTutorRepository
 import com.nexttechtitan.aptustutor.data.Assessment
 import com.nexttechtitan.aptustutor.data.AssessmentAnswer
@@ -24,7 +22,6 @@ import com.nexttechtitan.aptustutor.utils.DeviceCapability
 import com.nexttechtitan.aptustutor.utils.DeviceHealthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -44,28 +41,39 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** The immutable UI state for the submission grading screen. */
 data class SubmissionDetailsUiState(
     val submission: AssessmentSubmission? = null,
     val assessment: Assessment? = null,
+    /** A map holding the tutor's draft scores and feedback before they are saved. */
     val draftAnswers: Map<String, AssessmentAnswer> = emptyMap(),
     val feedbackSent: Boolean = false,
+    /** The ID of the question currently being graded by the AI, or null if none. */
     val isGradingQuestionId: String? = null,
     val isGradingEntireSubmission: Boolean = false,
     val gradingProgressText: String? = null,
     val deviceHealth: CapabilityResult? = null
 )
 
+/**
+ * ViewModel for the [SubmissionDetailsScreen].
+ * This screen is for grading a single student's submission. The ViewModel orchestrates:
+ * - Loading the submission and its associated assessment.
+ * - Managing draft scores and feedback in memory.
+ * - Triggering on-device AI grading for one or all questions.
+ * - Saving drafts or sending final feedback to the repository.
+ */
+
 @HiltViewModel
 class SubmissionDetailsViewModel @Inject constructor(
-    private val userPreferencesRepo: UserPreferencesRepository,
     private val repository: AptusTutorRepository,
     private val gemmaAiService: GemmaAiService,
     private val deviceHealthManager: DeviceHealthManager,
     @AiDispatcher private val aiDispatcher: CoroutineDispatcher,
+    userPreferencesRepo: UserPreferencesRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val submissionId: String = savedStateHandle.get("submissionId")!!
-    private val TAG = "AptusTutorDebug"
 
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
@@ -84,8 +92,9 @@ class SubmissionDetailsViewModel @Inject constructor(
     val modelState = gemmaAiService.modelState
 
     init {
-        Log.d(TAG, "Initializing for submissionId: $submissionId")
         viewModelScope.launch {
+            // Perform an initial, one-time read of the submission to populate the drafts.
+            // This decouples the tutor's edits from the database until they explicitly save.
             val initialSubmission = repository.getSubmissionFlow(submissionId).filterNotNull().first()
             val hasFeedbackBeenSent = initialSubmission.feedbackStatus == FeedbackStatus.DELIVERED ||
                     initialSubmission.feedbackStatus == FeedbackStatus.SENT_PENDING_ACK
@@ -99,6 +108,8 @@ class SubmissionDetailsViewModel @Inject constructor(
             }
         }
 
+        // Subsequently, launch flows that continuously observe the database for any
+        // external changes and update the UI state accordingly.
         repository.getSubmissionFlow(submissionId)
             .filterNotNull()
             .onEach { dbSubmission -> _uiState.update { it.copy(submission = dbSubmission) } }
@@ -107,13 +118,14 @@ class SubmissionDetailsViewModel @Inject constructor(
         repository.getAssessmentFlowBySubmission(submissionId)
             .onEach { assessment -> _uiState.update { it.copy(assessment = assessment) } }
             .launchIn(viewModelScope)
+
     }
 
     private fun isEntireSubmissionGraded(submission: AssessmentSubmission): Boolean {
         return submission.answers?.all { it.score != null && !it.feedback.isNullOrBlank() } ?: false
     }
 
-    // Called when the score text field changes.
+    /** Updates the score for a question in the local draft state. */
     fun onScoreChange(questionId: String, newScore: String, maxScore: Int) {
         val score = newScore.toIntOrNull()?.coerceIn(0, maxScore)
         _uiState.update { currentState ->
@@ -121,31 +133,32 @@ class SubmissionDetailsViewModel @Inject constructor(
             newDrafts[questionId]?.let {
                 newDrafts[questionId] = it.copy(score = score)
             }
-            // Any edit "unsaves" the question, requiring the tutor to save again.
             currentState.copy(
                 draftAnswers = newDrafts
             )
         }
     }
 
-    // Called when the feedback text field changes.
+    /** Updates the feedback for a question in the local draft state. */
     fun onFeedbackChange(questionId: String, newFeedback: String) {
         _uiState.update { currentState ->
             val newDrafts = currentState.draftAnswers.toMutableMap()
             newDrafts[questionId]?.let {
                 newDrafts[questionId] = it.copy(feedback = newFeedback)
             }
-            // Any edit "unsaves" the question.
             currentState.copy(
                 draftAnswers = newDrafts
             )
         }
     }
 
+    /**
+     * Finalizes the submission with the latest drafts and sends it to the student.
+     * This requires all questions to be fully graded first.
+     */
     fun sendFeedback() {
         viewModelScope.launch {
             _uiState.value.submission?.let { submission ->
-                // Ensure the submission object being sent has the latest drafts.
                 val finalSubmission = submission.copy(answers = _uiState.value.draftAnswers.values.toList())
 
                 if (!isEntireSubmissionGraded(finalSubmission)) {
@@ -177,28 +190,29 @@ class SubmissionDetailsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Triggers the AI to grade the entire submission question by question.
+     * It runs on a dedicated AI dispatcher, provides progress updates to the UI,
+     * and monitors device health to pause if the device overheats.
+     */
     fun gradeEntireSubmission() {
         viewModelScope.launch(aiDispatcher) {
-            Log.d(TAG, "gradeEntireSubmission called.")
             val initialCheck = deviceHealthManager.checkDeviceCapability()
             if (initialCheck.capability == DeviceCapability.UNSUPPORTED) {
                 _toastEvents.emit("AI Grading Halted: ${initialCheck.message}")
                 return@launch
             }
             if (uiState.value.isGradingEntireSubmission || uiState.value.isGradingQuestionId != null) {
-                Log.w(TAG, "AI is already busy grading the entire submission.")
                 _toastEvents.emit("AI is already busy.")
                 return@launch
             }
 
             val questionsToGrade = uiState.value.assessment?.questions ?: emptyList()
             if (questionsToGrade.isEmpty()) {
-                Log.w(TAG, "No questions found in assessment to grade.")
                 _toastEvents.emit("No questions to grade.")
                 return@launch
             }
 
-            Log.i(TAG, "Starting full submission AI grading for ${questionsToGrade.size} questions.")
             _uiState.update { it.copy(isGradingEntireSubmission = true) }
             _toastEvents.emit("Starting full submission AI grading...")
             startHealthMonitoring()
@@ -219,11 +233,12 @@ class SubmissionDetailsViewModel @Inject constructor(
 
                     val progressText =
                         "Grading Question ${index + 1} of ${questionsToGrade.size}..."
-                    Log.d(TAG, progressText)
                     _uiState.update { it.copy(gradingProgressText = progressText) }
 
                     val answer =
                         uiState.value.submission?.answers?.find { it.questionId == question.id }
+
+                    // This internal function contains the core logic for grading one question.
                     gradeSingleQuestionInternal(question, answer)
                 }
             } catch (e: Exception) {
@@ -233,7 +248,6 @@ class SubmissionDetailsViewModel @Inject constructor(
                 _uiState.update { it.copy(isGradingEntireSubmission = false, gradingProgressText = null) }
             }
 
-            Log.i(TAG, "AI grading complete for all questions.")
             _toastEvents.emit("AI grading complete!")
         }
     }
@@ -244,12 +258,10 @@ class SubmissionDetailsViewModel @Inject constructor(
      */
     private suspend fun gradeSingleQuestionInternal(question: AssessmentQuestion, answer: AssessmentAnswer?) {
         _uiState.update { it.copy(isGradingQuestionId = question.id) }
-        Log.d(TAG, "gradeSingleQuestionInternal started for Q-ID: ${question.id}")
 
         val imageBitmap: Bitmap? = answer?.imageFilePath?.let { BitmapFactory.decodeFile(it) }
 
         if (answer?.textResponse.isNullOrBlank() && imageBitmap == null) {
-            Log.i(TAG, "Programmatically grading blank answer for Q-ID: ${question.id}")
             val blankResult = AiGradeResponse(0, "No answer provided.")
             updateDraftsWithResult(question, blankResult)
             _uiState.update { it.copy(isGradingQuestionId = null) }
@@ -259,11 +271,7 @@ class SubmissionDetailsViewModel @Inject constructor(
         val result = gemmaAiService.grade(question, answer, imageBitmap)
 
         result.onSuccess { response ->
-            Log.i(TAG, "Successfully graded Q-ID: ${question.id}. Score: ${response.score}")
             val clampedScore = response.score?.coerceIn(0, question.maxScore)
-            if (clampedScore != response.score) {
-                Log.w(TAG, "AI returned score (${response.score}) outside range. Clamped to $clampedScore.")
-            }
             _uiState.update { currentState ->
                 val newDrafts = currentState.draftAnswers.toMutableMap()
                 val existingAnswer = newDrafts[question.id] ?: AssessmentAnswer(questionId = question.id)
@@ -274,7 +282,6 @@ class SubmissionDetailsViewModel @Inject constructor(
                 currentState.copy(draftAnswers = newDrafts)
             }
         }.onFailure { error ->
-            Log.e(TAG, "AI Grading Failed for Q-ID: ${question.id}", error)
             _toastEvents.emit("AI Grading Failed for Q#${getQuestionNumber(question.id)}: ${error.message}")
         }
 
@@ -283,9 +290,6 @@ class SubmissionDetailsViewModel @Inject constructor(
 
     private fun updateDraftsWithResult(question: AssessmentQuestion, response: AiGradeResponse) {
         val clampedScore = response.score?.coerceIn(0, question.maxScore)
-        if (clampedScore!= response.score) {
-            Log.w(TAG, "AI returned score (${response.score}) outside range. Clamped to $clampedScore.")
-        }
         _uiState.update { currentState ->
             val newDrafts = currentState.draftAnswers.toMutableMap()
             val existingAnswer = newDrafts[question.id]?: AssessmentAnswer(questionId = question.id)
@@ -297,6 +301,11 @@ class SubmissionDetailsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Provides a shortcut to automatically grade all multiple-choice questions
+     * by comparing the student's answer to the correct answer index stored in the
+     * question's marking guide.
+     */
     fun autoGradeMcqQuestions() {
         viewModelScope.launch {
             val assessment = _uiState.value.assessment?: return@launch
@@ -339,6 +348,7 @@ class SubmissionDetailsViewModel @Inject constructor(
         }
     }
 
+    /** Persists the current draft answers to the local database without sending to the student. */
     fun saveAllDrafts() {
         viewModelScope.launch {
             val submission = _uiState.value.submission?: return@launch
