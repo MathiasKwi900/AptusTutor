@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -60,13 +59,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.work.WorkInfo
-import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
+import com.nexttechtitan.aptustutor.data.AiSettingsUiState
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.ui.student.OrDivider
 import kotlinx.coroutines.flow.collectLatest
@@ -83,7 +83,7 @@ fun AiSettingsScreen(
     viewModel: AiSettingsViewModel = hiltViewModel()
 ) {
     val modelStatus by viewModel.modelStatus.collectAsStateWithLifecycle(initialValue = ModelStatus.NOT_DOWNLOADED)
-    val downloadWorkInfo by viewModel.downloadWorkInfo.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val showMeteredDialog by viewModel.showMeteredNetworkDialog.collectAsStateWithLifecycle()
     val isLoadingFromStorage by viewModel.isLoadingFromStorage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -156,7 +156,7 @@ fun AiSettingsScreen(
             ) {
                 ModelManagerCard(
                     modelStatus = modelStatus,
-                    workInfo = downloadWorkInfo,
+                    uiState = uiState,
                     onDownload = { viewModel.onDownloadAction() },
                     onCancel = { viewModel.cancelDownload() },
                     onLoadFromFile = { filePickerLauncher.launch("application/octet-stream") },
@@ -199,13 +199,14 @@ fun AiSettingsScreen(
 private fun ModelManagerCard(
     modifier: Modifier = Modifier,
     modelStatus: ModelStatus,
-    workInfo: WorkInfo?,
+    uiState: AiSettingsUiState,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onLoadFromFile: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val downloadState = workInfo?.state
+    val downloadState = uiState.downloadState
+    val progress = uiState.downloadProgress
     val isDownloading = modelStatus == ModelStatus.DOWNLOADING ||
             downloadState == WorkInfo.State.ENQUEUED ||
             downloadState == WorkInfo.State.RUNNING
@@ -220,8 +221,9 @@ private fun ModelManagerCard(
                 style = MaterialTheme.typography.titleLarge,
                 textAlign = TextAlign.Center
             )
+            Spacer(Modifier.height(8.dp))
             Text(
-                "Gemma 3N-E2B (INT4 Quantized)",
+                "Gemma 3n-E2B (INT4 Quantized)",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -234,26 +236,46 @@ private fun ModelManagerCard(
             when {
                 // STATE 1: DOWNLOADING
                 isDownloading -> {
-                    val progress = workInfo?.progress?.getInt(ModelDownloadWorker.PROGRESS, 0) ?: 0
-                    val animatedProgress by animateFloatAsState(targetValue = progress / 100f, label = "downloadProgress")
-
-                    Text("Downloading Model...", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(16.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        LinearProgressIndicator(
-                            progress = { animatedProgress },
-                            modifier = Modifier.weight(1f).height(8.dp).clip(CircleShape)
+                    if (downloadState == WorkInfo.State.ENQUEUED) {
+                        Text("Download Queued", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                "Waiting for conditions (e.g., network)...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = if (progress > 0) "Downloading: $progress%" else "Connecting. Please wait...",
+                            style = MaterialTheme.typography.titleMedium
                         )
-                        Spacer(Modifier.width(16.dp))
-                        Text("$progress%", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(16.dp))
+                        if (progress > 0) {
+                            val animatedProgress by animateFloatAsState(
+                                targetValue = progress / 100f,
+                                label = "downloadProgress"
+                            )
+                            LinearProgressIndicator(
+                                progress = { animatedProgress },
+                                modifier = Modifier.fillMaxWidth(),
+                                strokeCap = StrokeCap.Round,
+                                gapSize = 0.dp,
+                                drawStopIndicator = {}
+                            )
+                        } else {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
                     }
 
                     Spacer(Modifier.height(20.dp))
 
                     Button(
                         onClick = onCancel,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Rounded.Error, contentDescription = "Cancel")
@@ -317,7 +339,7 @@ private fun ModelManagerCard(
                     Spacer(Modifier.height(8.dp))
                     Text("Download Required", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     Text(
-                        "Download the model (approx. 2.92 GB) to enable offline AI features. This is a one-time download",
+                        "Download the model (approx. 3.14 GB) to enable offline AI features. This is a one-time download",
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center
                     )
@@ -372,7 +394,7 @@ private fun MeteredNetworkDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
         icon = { Icon(Icons.Rounded.SignalCellularAlt, contentDescription = "Warning") },
         title = { Text("No Wi-Fi Connection") },
         text = {
-            Text("You are not connected to Wi-Fi. Downloading the AI model (approx. 2.92 GB) will use your mobile data. Do you want to continue?")
+            Text("You are not connected to Wi-Fi. Downloading the AI model (approx. 3.14 GB) will use your mobile data. Do you want to continue?")
         },
         confirmButton = {
             Button(onClick = onConfirm) { Text("Use Mobile Data") }

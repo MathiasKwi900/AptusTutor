@@ -22,7 +22,7 @@ class ThermalManager @Inject constructor(@ApplicationContext private val context
     }
 
     companion object {
-        // A conservative threshold. If thermal headroom is below 25%, we should pause.
+        // If thermal headroom usage is above 75%, we should pause.
         private const val SAFE_THERMAL_HEADROOM = 0.75f
     }
 
