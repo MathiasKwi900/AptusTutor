@@ -60,7 +60,7 @@ class SubmissionDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val submissionId: String = savedStateHandle.get("submissionId")!!
-    private val TAG = "AptusTutorDebug"
+    private val TAG = "SubmissionVM"
 
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
@@ -213,6 +213,8 @@ class SubmissionDetailsViewModel @Inject constructor(
         _uiState.update { it.copy(isGradingQuestionId = question.id) }
         Log.d(TAG, "gradeSingleQuestionInternal started for Q-ID: ${question.id}")
 
+        val studentId = uiState.value.submission?.studentId?: "unknown_student"
+        Log.d(TAG, "gradeSingleQuestionInternal started for Q-ID: ${question.id} | Student-ID: $studentId")
         val imageBitmap: Bitmap? = answer?.imageFilePath?.let { BitmapFactory.decodeFile(it) }
 
         if (answer?.textResponse.isNullOrBlank() && imageBitmap == null) {
@@ -223,7 +225,7 @@ class SubmissionDetailsViewModel @Inject constructor(
             return
         }
 
-        val result = gemmaAiService.grade(question, answer, imageBitmap)
+        val result = gemmaAiService.grade(question, answer, imageBitmap, studentId)
 
         result.onSuccess { response ->
             Log.i(TAG, "Successfully graded Q-ID: ${question.id}. Score: ${response.score}")

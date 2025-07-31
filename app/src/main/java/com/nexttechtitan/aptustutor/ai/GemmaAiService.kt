@@ -15,14 +15,12 @@ import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import com.nexttechtitan.aptustutor.utils.JsonExtractionUtils
 import com.nexttechtitan.aptustutor.utils.MemoryLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -59,43 +57,36 @@ class GemmaAiService @Inject constructor(
 
     /**
      * The primary public method for grading. It accepts structured data, which is a robust
-     * API contract. The ViewModel should be updated to call this method.
+     * API contract.
      */
     suspend fun grade(
         question: AssessmentQuestion,
         answer: AssessmentAnswer?,
-        image: Bitmap? = null
+        image: Bitmap? = null,
+        studentIdentifier: String
     ): Result<AiGradeResponse> {
         return inferenceMutex.withLock {
             _modelState.value = ModelState.Busy
+            Log.i(TAG, "================== NEW GRADING TASK FOR: $studentIdentifier ==================")
 
-            // Step 1: Build the static prefix and dynamic suffix from the structured data.
             val (prefixPrompt, suffixPrompt) = buildPrompts(question, answer)
             val questionId = question.id
             val isVision = image!= null
 
-            // Step 2: Get a dedicated engine for this specific question.
-            // If one doesn't exist, this method will create and warm a new one.
             val engineResult = getOrCreateWarmedEngine(questionId, prefixPrompt, isVision)
 
             if (engineResult.isFailure) {
-                // If engine creation/warming fails, the task fails, but the service is ready for another try.
                 _modelState.value = ModelState.Ready
                 return@withLock Result.failure(engineResult.exceptionOrNull()!!)
             }
             val engine = engineResult.getOrNull()!!
 
-            // Step 3: Perform the fast inference using the pre-warmed engine and the student's answer (suffix).
-            val result = gradeInternalSuffix(engine, suffixPrompt, image)
+            val result = gradeInternalSuffix(engine, suffixPrompt, image, studentIdentifier, questionId)
             _modelState.value = ModelState.Ready
             result
         }
     }
 
-    /**
-     * Retrieves a pre-warmed engine from the cache or creates, warms, and caches a new one.
-     * This is the core logic for managing the pool of dedicated engines.
-     */
     private suspend fun getOrCreateWarmedEngine(
         questionId: String,
         prefixPrompt: String,
@@ -103,19 +94,16 @@ class GemmaAiService @Inject constructor(
     ): Result<LlmInference> {
         val engineMap = if (isVision) warmedVisionEngines else warmedTextEngines
 
-        // If a dedicated engine for this question already exists, return it immediately.
+        Log.d(TAG, "[CACHE CHECK] Checking for existing warmed engine for Q-ID: $questionId")
         engineMap[questionId]?.let {
-            Log.d(TAG, "Found existing warmed engine for Q-ID: $questionId")
+            Log.i(TAG, " Found existing warmed engine for Q-ID: $questionId. Reusing it.")
             return Result.success(it)
         }
 
-        // If not found, create and warm a new one. This is the slow, one-time operation for this question.
-        Log.i(TAG, "No engine for Q-ID: $questionId. Creating and warming a new one...")
+        Log.w(TAG, " No engine for Q-ID: $questionId. Creating and warming a new one. THIS WILL BE SLOW.")
         _modelState.value = ModelState.LoadingModel
 
-        Log.d(TAG, "Model path check before")
         val modelPath = userPreferencesRepo.aiModelPathFlow.first()
-        Log.d(TAG, "Model path check after")
         if (modelPath.isNullOrBlank()) {
             val error = IllegalArgumentException("Model path not set.")
             _modelState.value = ModelState.Failed(error)
@@ -129,18 +117,16 @@ class GemmaAiService @Inject constructor(
                 .apply { if (isVision) setMaxNumImages(1) }
                 .setPreferredBackend(LlmInference.Backend.CPU)
                 .build()
-            memoryLogger.logMemory(TAG, "Before creating new engine")
+
+            memoryLogger.logMemory(TAG, "Before creating new engine for Q-ID: $questionId")
             val newEngine = LlmInference.createFromOptions(context, options)
-            memoryLogger.logMemory(TAG, "After creating new engine")
+            memoryLogger.logMemory(TAG, "After creating new engine for Q-ID: $questionId")
 
-            // Perform the expensive prefill on the prefix to populate the engine's KV Cache.
-            Log.d(TAG, "Warming engine for Q-ID: $questionId")
+            Log.d(TAG, " Warming engine for Q-ID: $questionId with prefix prompt.")
             warmEngine(newEngine, prefixPrompt, isVision)
-            Log.d(TAG, "Engine warmed for Q-ID: $questionId")
+            Log.i(TAG, " Engine for Q-ID: $questionId is now warm and cached.")
 
-            // Store the new, warmed engine in our map for future reuse.
             engineMap[questionId] = newEngine
-            Log.i(TAG, "Successfully created and warmed engine for Q-ID: $questionId")
             _modelState.value = ModelState.Ready
             Result.success(newEngine)
         } catch (e: Exception) {
@@ -150,46 +136,44 @@ class GemmaAiService @Inject constructor(
         }
     }
 
-    /**
-     * Performs the fast inference on the suffix, assuming the engine is already warmed.
-     * This function creates a lightweight, disposable session for each student answer.
-     */
     private fun gradeInternalSuffix(
         engine: LlmInference,
         suffixPrompt: String,
-        image: Bitmap? = null
+        image: Bitmap? = null,
+        studentIdentifier: String,
+        questionId: String
     ): Result<AiGradeResponse> {
         var session: LlmInferenceSession? = null
-        return try {
+        Log.i(TAG, "Attempting to create LlmInferenceSession for $studentIdentifier from engine for Q-ID: $questionId")
+        try {
             val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
                 .setTopK(1)
                 .setTemperature(0.1f)
                 .build()
 
-            // Create a lightweight session from the dedicated, pre-warmed engine.
             session = LlmInferenceSession.createFromOptions(engine, sessionOptions)
+            Log.d(TAG, " Successfully created session for $studentIdentifier.")
 
             session.addQueryChunk(suffixPrompt)
             if (image!= null) {
                 session.addImage(BitmapImageBuilder(image).build())
             }
 
-            memoryLogger.logMemory(TAG, "Before fast inference (Cached Suffix)")
+            Log.d(TAG, " Generating response for $studentIdentifier...")
             val response = session.generateResponse()
-            memoryLogger.logMemory(TAG, "After fast inference (Cached Suffix)")
+            Log.i(TAG, " Successfully generated response for $studentIdentifier.")
 
             val parsedResponse = parseJsonResponse(response)
-            if (parsedResponse.score == null || parsedResponse.feedback.isNullOrBlank()) {
+            return if (parsedResponse.score == null || parsedResponse.feedback.isNullOrBlank()) {
                 Result.failure(Exception("AI response was incomplete or invalid."))
             } else {
                 Result.success(parsedResponse)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error during internal AI grading", e)
-            Result.failure(e)
+            Log.e(TAG, "Error during grading for $studentIdentifier. This point is reached if session creation fails or during inference.", e)
+            return Result.failure(e)
         } finally {
             session?.close()
-            Log.d(TAG, "Ephemeral session closed, suffix cache purged.")
         }
     }
 
@@ -212,9 +196,9 @@ class GemmaAiService @Inject constructor(
             }
             session = LlmInferenceSession.createFromOptions(engine, sessionOptionsBuilder.build())
             session.addQueryChunk(warmupPrompt)
-            memoryLogger.logMemory(TAG, "[Warm-up] Before warm engine")
+            memoryLogger.logMemory(TAG, " Memory before expensive prefill")
             session.generateResponse()
-            memoryLogger.logMemory(TAG, "[Warm-up] After warm engine")
+            memoryLogger.logMemory(TAG, " Memory after expensive prefill")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to warm engine.", e)
             throw e
@@ -261,7 +245,6 @@ class GemmaAiService @Inject constructor(
 
     /**
      * Releases all cached engine instances to free up memory.
-     * This should be called when the grading screen is closed or the app is backgrounded.
      */
     suspend fun releaseModels() {
         inferenceMutex.withLock {
