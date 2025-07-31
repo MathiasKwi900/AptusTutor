@@ -1,0 +1,510 @@
+package com.nexttechtitan.aptustutor.ui.student
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.util.Log
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.nexttechtitan.aptustutor.data.QuestionType
+import com.nexttechtitan.aptustutor.data.StudentAssessmentQuestion
+import com.nexttechtitan.aptustutor.utils.FileUtils
+import com.nexttechtitan.aptustutor.utils.ImageUtils
+import kotlinx.coroutines.launch
+import java.io.File
+
+/**
+ * The screen where a student actively takes a timed assessment.
+ * It displays questions one by one and provides input fields for text or image answers.
+ * It also handles the back press to prevent accidental exits.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AssessmentScreen(
+    viewModel: StudentDashboardViewModel = hiltViewModel(),
+    onNavigateBack: () -> Unit
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val timeLeft by viewModel.timeLeft.collectAsStateWithLifecycle()
+    val assessment = uiState.activeAssessment
+
+    var showExitDialog by remember { mutableStateOf(false) }
+
+    // This effect is critical for the screen's lifecycle. It starts the assessment
+    // timer as soon as assessment data is available from the ViewModel. If the
+    // assessment becomes null (e.g., after submission), it triggers navigation back.
+    LaunchedEffect(assessment) {
+        if (assessment != null) {
+            viewModel.startAssessmentTimer(assessment.durationInMinutes)
+        } else {
+            onNavigateBack()
+        }
+    }
+
+    // Intercepts the system back button press to show a confirmation dialog,
+    // preventing the student from accidentally losing their progress.
+    BackHandler {
+        showExitDialog = true
+    }
+
+    if (assessment == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        topBar = {
+            TopAppBar(
+                title = { Text(assessment.title, maxLines = 1, fontWeight = FontWeight.Bold) },
+                actions = {
+                    Card(
+                        modifier = Modifier.padding(end = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                    ) {
+                        Text(
+                            text = formatTime(timeLeft),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+            )
+        },
+        bottomBar = {
+            BottomAppBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentPadding = PaddingValues(16.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.submitAssessment() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text("Submit Assessment", fontSize = 16.sp, modifier = Modifier.padding(vertical = 4.dp))
+                }
+            }
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            itemsIndexed(assessment.questions, key = { _, q -> q.id }) { index, question ->
+                when (question.type) {
+                    QuestionType.MULTIPLE_CHOICE -> {
+                        McqQuestionCard(
+                            questionNumber = index + 1,
+                            question = question,
+                            viewModel = viewModel
+                        )
+                    }
+                    else -> {
+                        QuestionCard(
+                            questionNumber = index + 1,
+                            question = question,
+                            viewModel = viewModel
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showExitDialog) {
+        ExitConfirmationDialog(
+            onDismiss = { showExitDialog = false },
+            onConfirm = {
+                showExitDialog = false
+                viewModel.submitAssessment(true)
+            }
+        )
+    }
+}
+
+/**
+ * A card that displays a single question and provides the appropriate input fields
+ * for a student's answer (e.g., text field, camera button).
+ */
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun QuestionCard(
+    questionNumber: Int,
+    question: StudentAssessmentQuestion,
+    viewModel: StudentDashboardViewModel
+) {
+    val context = LocalContext.current
+    var tempImageUriHolder by remember { mutableStateOf<Uri?>(null) }
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // The launcher for the camera activity. The result lambda is crucial:
+    // it compresses the captured image, saves it to a permanent file in app storage,
+    // and then passes the stable URI of that new file to the ViewModel.
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            tempImageUriHolder?.let { uri ->
+                scope.launch {
+                    val snackbarMessage = try {
+                        when (val result = ImageUtils.compressImage(context, uri)) {
+                            is ImageUtils.ImageCompressionResult.Success -> {
+                                val submissionId = viewModel.getSubmissionId()
+                                val permanentPath = FileUtils.saveAnswerImage(
+                                    context = context,
+                                    byteArray = result.byteArray,
+                                    submissionId = submissionId,
+                                    questionId = question.id
+                                )
+
+                                if (permanentPath != null) {
+                                    viewModel.updateImageAnswer(question.id, Uri.fromFile(File(permanentPath)))
+                                    "Image captured."
+                                } else {
+                                    "Error saving image."
+                                }
+                            }
+                            is ImageUtils.ImageCompressionResult.Error -> result.message
+                        }
+                    } catch (e: Exception) {
+                        "An error occurred while processing the image."
+                    }
+                    snackbarHostState.showSnackbar(snackbarMessage)
+                }
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            tempImageUriHolder?.let { uri ->
+                cameraLauncher.launch(uri)
+            }
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("Camera permission is required to attach an image.")
+            }
+        }
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("Question $questionNumber", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("${question.maxScore} marks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(question.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
+
+                question.questionImageFile?.let { imagePath ->
+                    Spacer(Modifier.height(12.dp))
+                    val imageFile = File(imagePath)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(MaterialTheme.colorScheme.surfaceContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (imageFile.exists()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(imageFile).crossfade(true).build(),
+                                contentDescription = "Question Image",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            CircularProgressIndicator()
+                        }
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(16.dp)
+            ) {
+                Text("Your Answer", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = viewModel.textAnswers[question.id] ?: "",
+                    onValueChange = { viewModel.updateTextAnswer(question.id, it) },
+                    label = { Text("Type your answer here") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 120.dp)
+                )
+
+                OrDivider()
+
+                ImageAnswerInput(
+                    capturedImageUri = viewModel.imageAnswers[question.id],
+                    onLaunchCamera = {
+                        val permission = Manifest.permission.CAMERA
+                        if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
+                            val uri = ComposeFileProvider.getImageUri(context)
+                            tempImageUriHolder = uri
+                            cameraLauncher.launch(uri)
+                        } else {
+                            val uri = ComposeFileProvider.getImageUri(context)
+                            tempImageUriHolder = uri
+                            permissionLauncher.launch(permission)
+                        }
+                    }
+                )
+            }
+        }
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.CenterHorizontally))
+    }
+}
+
+@Composable
+private fun ImageAnswerInput(
+    capturedImageUri: Uri?,
+    onLaunchCamera: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (capturedImageUri != null) {
+            Box {
+                Image(
+                    painter = rememberAsyncImagePainter(capturedImageUri),
+                    contentDescription = "Captured Answer",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium),
+                    contentScale = ContentScale.Fit
+                )
+            }
+        }
+
+        val buttonText = if (capturedImageUri == null) "Capture Written Answer" else "Retake Picture"
+        val buttonIsPrimary = capturedImageUri == null
+
+        if (buttonIsPrimary) {
+            Button(onClick = onLaunchCamera) {
+                Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text(buttonText)
+            }
+        } else {
+            OutlinedButton(onClick = onLaunchCamera) {
+                Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                Text(buttonText)
+            }
+        }
+    }
+}
+
+/**
+ * A specialized question card for Multiple Choice Questions, using radio buttons
+ * for a clear and intuitive selection experience.
+ */
+@Composable
+fun McqQuestionCard(
+    questionNumber: Int,
+    question: StudentAssessmentQuestion,
+    viewModel: StudentDashboardViewModel
+) {
+    val selectedOptionIndex = viewModel.textAnswers[question.id]?.toIntOrNull()
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text("Question $questionNumber", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("${question.maxScore} marks", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(question.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
+            Spacer(Modifier.height(16.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                question.options?.forEachIndexed { index, optionText ->
+                    val isSelected = selectedOptionIndex == index
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { viewModel.updateTextAnswer(question.id, index.toString()) },
+                        shape = MaterialTheme.shapes.medium,
+                        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { viewModel.updateTextAnswer(question.id, index.toString()) }
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Text(
+                                text = "${('A' + index)}. $optionText",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun OrDivider() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        HorizontalDivider(Modifier.weight(1f))
+        Text("OR", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HorizontalDivider(Modifier.weight(1f))
+    }
+}
+
+/**
+ * A confirmation dialog shown when the user tries to exit the assessment,
+ * ensuring they understand that leaving will auto-submit their work.
+ */
+@Composable
+private fun ExitConfirmationDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.WarningAmber, contentDescription = "Warning") },
+        title = { Text("Submit Assessment?") },
+        text = { Text("Are you sure you want to exit? Your assessment will be submitted as is.") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) { Text("Exit & Submit") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+private fun formatTime(seconds: Int): String {
+    val minutes = seconds / 60
+    val remainingSeconds = seconds % 60
+    return "%02d:%02d".format(minutes, remainingSeconds)
+}
+
+/**
+ * A utility object that uses a FileProvider to create a content URI for the camera.
+ * This is the standard, secure way to allow the camera app to write an image to a
+ * file that our app can then read.
+ */
+object ComposeFileProvider {
+    fun getImageUri(context: Context): Uri {
+        val directory = File(context.cacheDir, "images")
+        directory.mkdirs()
+        val file = File.createTempFile("captured_image_", ".jpg", directory)
+        val authority = "${context.packageName}.provider"
+        return FileProvider.getUriForFile(context, authority, file)
+    }
+}
