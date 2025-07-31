@@ -1,5 +1,6 @@
 package com.nexttechtitan.aptustutor.data
 
+import androidx.work.WorkInfo
 import java.util.UUID
 
 /** Represents a tutor's session discovered by a student on the network. */
@@ -95,4 +96,9 @@ data class AssessmentAnswer(
 data class SessionHistoryItem(
     val sessionWithDetails: SessionWithClassDetails,
     val hasSubmission: Boolean
+)
+
+data class AiSettingsUiState(
+    val downloadState: WorkInfo.State? = null,
+    val downloadProgress: Int = 0
 )

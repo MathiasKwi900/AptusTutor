@@ -14,6 +14,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.nexttechtitan.aptustutor.ai.ModelDownloadWorker
+import com.nexttechtitan.aptustutor.data.AiSettingsUiState
 import com.nexttechtitan.aptustutor.data.ModelStatus
 import com.nexttechtitan.aptustutor.data.UserPreferencesRepository
 import com.nexttechtitan.aptustutor.utils.NetworkUtils
@@ -56,6 +57,10 @@ class AiSettingsViewModel @Inject constructor(
     private val _toastEvents = MutableSharedFlow<String>()
     val toastEvents = _toastEvents.asSharedFlow()
 
+    private val _uiState = MutableStateFlow(AiSettingsUiState())
+    val uiState: StateFlow<AiSettingsUiState> = _uiState.asStateFlow()
+
+
     private val _isLoadingFromStorage = MutableStateFlow(false)
     val isLoadingFromStorage = _isLoadingFromStorage.asStateFlow()
 
@@ -66,11 +71,24 @@ class AiSettingsViewModel @Inject constructor(
      * A flow that observes the state of the [ModelDownloadWorker] from WorkManager.
      * This allows the UI to reactively display download progress and status.
      */
-    val downloadWorkInfo: StateFlow<WorkInfo?> =
+    private val downloadWorkInfo: StateFlow<WorkInfo?> =
         workManager.getWorkInfosForUniqueWorkLiveData(ModelDownloadWorker.WORK_NAME)
             .asFlow()
             .map { it.firstOrNull() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    init {
+        viewModelScope.launch {
+            downloadWorkInfo.collect { workInfo ->
+                val progress = workInfo?.progress?.getInt(ModelDownloadWorker.PROGRESS, 0) ?: 0
+                val state = workInfo?.state
+                _uiState.value = AiSettingsUiState(
+                    downloadState = state,
+                    downloadProgress = progress
+                )
+            }
+        }
+    }
 
     /**
      * Handles the user's "Download" action. It checks the network state and either
@@ -123,6 +141,7 @@ class AiSettingsViewModel @Inject constructor(
     fun cancelDownload() {
         viewModelScope.launch {
             workManager.cancelUniqueWork(ModelDownloadWorker.WORK_NAME)
+            userPreferencesRepo.setAiModel(ModelStatus.NOT_DOWNLOADED)
             _toastEvents.emit("Download cancelled.")
         }
     }
