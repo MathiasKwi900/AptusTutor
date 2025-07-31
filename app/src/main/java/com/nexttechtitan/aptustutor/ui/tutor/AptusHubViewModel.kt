@@ -138,7 +138,8 @@ class AptusHubViewModel @Inject constructor(
                             questionId = question.questionId,
                             textResponse = studentAnswer.answerText
                         ),
-                        image = studentAnswer.answerImage
+                        image = studentAnswer.answerImage,
+                        studentIdentifier = studentAnswer.studentId
                     )
 
                     if (isFirstForThisQuestion) {
