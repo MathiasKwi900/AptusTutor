@@ -69,13 +69,11 @@ To build and run the project locally, follow these steps:
    ```bash
    git clone https://github.com/MathiasKwi900/AptusTutor.git
 
-## 📱 2. Open in Android Studio
+2. **Open in Android Studio**
 
 Open the cloned project directory in the latest stable version of **Android Studio** and allow **Gradle** to sync.
 
-
-
-## 🤖 3. Set up the AI Model (CRITICAL STEP)
+3. **Set up the AI Model (CRITICAL STEP)**
 
 The AI features **will not work** without the **Gemma 3n** model file. You have two options:
 
@@ -131,7 +129,7 @@ If you already have the `gemma-3n-E2B-it-int4.task` file, you can load it direct
 | `AptusTutorEntities.kt`                | `@Entity` classes defining all database tables |
 | `Payloads.kt`                  | Data classes for Nearby Connections network payloads |
 | `UiState.kt`             | Data classes for UI state (e.g., `TutorDashboardUiState`) |
-| `UserPreferencesRepository.kt` | Manages user settings with Jetpack DataStore |
+| `UserDataStore.kt` | Manages user settings with Jetpack DataStore |
 
 
 
@@ -139,7 +137,7 @@ If you already have the `gemma-3n-E2B-it-int4.task` file, you can load it direct
 
 | File | Description |
 |------|-------------|
-| `AppModule.kt` | Provides singleton instances of services, DB, etc. |
+| `HiltModules.kt` | Provides singleton instances of services, DB, etc. |
 
 
 
