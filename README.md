@@ -1,6 +1,6 @@
 # AptusTutor: On-Device AI for the Underserved Educator 🧑‍🏫
 
-## Leveraging Google’s Gemma 3n to deliver private, offline, and powerful classroom analytics directly on low-cost hardware.
+## Leveraging Gemma 3n's Architectural Efficiency for Private, Offline Classroom Analytics on Low-Cost Hardware
 
 AptusTutor is an Android application developed for the Google Gemma 3n Impact Challenge. It leverages the power of Google’s Gemma 3n model to deliver private, offline, AI-powered student assessment and classroom analytics directly on low-cost Android devices.
 
@@ -13,7 +13,7 @@ The project’s vision is to address a critical gap in global education: the lac
 | --------------------------- | ----------------------------------------------------------- |
 | 🎬 Video Demo               | [Paste your video demo link here]()                        |
 | 📦 Live Demo (APK Download) | `https://your-apk-download-link-here.apk`                   |
-| 📄 Full Technical Write-up  | [Paste the link to your full technical write-up here]()     |
+| 📄 Full Technical Write-up  | `https://www.kaggle.com/competitions/google-gemma-3n-hackathon/writeups/unlocking-offline-ai-power-with-aptustutor`     |
 
 
 ## ✨ Key Features
