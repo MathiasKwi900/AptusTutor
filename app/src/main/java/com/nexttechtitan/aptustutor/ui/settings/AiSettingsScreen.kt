@@ -1,8 +1,11 @@
 package com.nexttechtitan.aptustutor.ui.settings
 
+import android.Manifest
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -63,6 +66,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.work.WorkInfo
@@ -91,7 +95,19 @@ fun AiSettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // A launcher for the system file picker, used to select a local model file.
+    val postNotificationsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                viewModel.onDownloadAction()
+            } else {
+                scope.launch {
+                    snackbarHostState.showSnackbar("Permission denied. Download will proceed without showing download progress notifications.")
+                    viewModel.onDownloadAction()
+                }
+            }
+        }
+    )
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -157,7 +173,19 @@ fun AiSettingsScreen(
                 ModelManagerCard(
                     modelStatus = modelStatus,
                     uiState = uiState,
-                    onDownload = { viewModel.onDownloadAction() },
+                    onDownload = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            val permission = Manifest.permission.POST_NOTIFICATIONS
+                            val isPermissionGranted = ContextCompat.checkSelfPermission(context, permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            if (isPermissionGranted) {
+                                viewModel.onDownloadAction()
+                            } else {
+                                postNotificationsPermissionLauncher.launch(permission)
+                            }
+                        } else {
+                            viewModel.onDownloadAction()
+                        }
+                    },
                     onCancel = { viewModel.cancelDownload() },
                     onLoadFromFile = { filePickerLauncher.launch("application/octet-stream") },
                     onDelete = { showDeleteDialog = true }
