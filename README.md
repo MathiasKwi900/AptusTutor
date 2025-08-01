@@ -4,7 +4,7 @@
 
 AptusTutor is an Android application developed for the Google Gemma 3n Impact Challenge. It leverages the power of Google’s Gemma 3n model to deliver private, offline, AI-powered student assessment and classroom analytics directly on low-cost Android devices.
 
-The project’s vision is to address a critical gap in global education: the lack of data-driven teaching tools in low-connectivity, resource-constrained environments. By proving its utility on representative low-end hardware, AptusTutor establishes a viable blueprint for serving millions of educators who have access to smartphones but lack reliable internet or high-end devices.
+The project’s vision is to address a critical gap in global education: the limited availability of data-driven teaching tools in low-connectivity, resource-constrained environments. By proving its utility on representative low-end hardware, AptusTutor establishes a viable blueprint for serving millions of educators who have access to smartphones but lack reliable internet or high-end devices.
 
 
 ## 🔗 Links & Demo
@@ -62,20 +62,28 @@ A deliberate engineering decision was made to revert to a more stable, albeit sl
 
 
 ## 🚀 Getting Started
+### **1. App Installation**
 
-To build and run the project locally, follow these steps:
+You have two main ways to try AptusTutor: a quick direct installation or building the project from the source code.
 
-1. **Clone the Repository**  
+**Option 1: Direct Install (Recommended for Most Users)**
+
+This is the fastest way to get the app running on your device.
+
+Download the APK: Grab the latest release from the Live Demo (APK Download) link at the top of this README.
+
+Install the App: Open the downloaded .apk file on your Android device to install it. You may need to enable "Install from unknown sources" in your device's security settings.
+
+
+**Option 2: Clone the Repository**  
    ```bash
    git clone https://github.com/MathiasKwi900/AptusTutor.git
 
-2. **Open in Android Studio**
-
 Open the cloned project directory in the latest stable version of **Android Studio** and allow **Gradle** to sync.
 
-3. **Set up the AI Model (CRITICAL STEP)**
+### **2. Setting up the AI Model (CRITICAL STEP)**
 
-The AI features **will not work** without the **Gemma 3n** model file. You have two options:
+Whether you installed the app via option 1 or 2, the AI features **will not work** without the **Gemma 3n** model file. You have two options:
 
 ### ✅ Option A: In-App Download (Recommended for most users)
 
@@ -87,17 +95,18 @@ The AI features **will not work** without the **Gemma 3n** model file. You have 
 
 
 
-### ⚙️ Option B: Manual Setup (For developers)
+### ⚙️ Option B: Manual Setup
 
 If you already have the `gemma-3n-E2B-it-int4.task` file, you can load it directly.
 
-1. Build and run the app.
+1. Install or build and run the app.
 2. Navigate to the **'AI Model Settings'** screen as described above.
 3. Tap the **"Load from Device Storage"** button.
 4. Use the **file picker** to select your local `.task` model file.
 
 > **Note:** The app is specifically architected for the `gemma-3n-E2B-it-int4.task` model.  
 > Using other models may result in unexpected behavior or crashes.
+
 
 ## 📂 Project Structure — `com.nexttechtitan.aptustutor`
 
