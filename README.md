@@ -78,7 +78,7 @@ This is the fastest way to get the app running on your device.
 **Option 2: Clone the Repository**  
    ```bash
    git clone https://github.com/MathiasKwi900/AptusTutor.git
-
+   ```
 
 Open the cloned project directory in the latest stable version of **Android Studio** and allow **Gradle** to sync.
 
