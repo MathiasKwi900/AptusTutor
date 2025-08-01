@@ -88,7 +88,7 @@ Whether you installed the app via option 1 or 2, the AI features **will not work
 
 ### ✅ Option A: In-App Download (Recommended for most users)
 
-1. Build and run the app on your Android device.
+1. Install or build and run the app on your Android device.
 2. Select a user role (**Tutor** or **Student**) and navigate to the main dashboard.
 3. Tap the **three-dot menu** in the top-right corner and select **'AI Model Settings'**.
 4. On the **'AI Model Management'** screen, tap the **"Download Model"** button.
