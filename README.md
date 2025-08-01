@@ -70,14 +70,15 @@ You have two main ways to try AptusTutor: a quick direct installation or buildin
 
 This is the fastest way to get the app running on your device.
 
-Download the APK: Grab the latest release from the Live Demo (APK Download) link at the top of this README.
+**Download the APK:** Grab the latest release from the Live Demo (APK Download) link at the top of this README.
 
-Install the App: Open the downloaded .apk file on your Android device to install it. You may need to enable "Install from unknown sources" in your device's security settings.
+**Install the App:** Open the downloaded .apk file on your Android device to install it. You may need to enable "Install from unknown sources" in your device's security settings.
 
 
 **Option 2: Clone the Repository**  
    ```bash
    git clone https://github.com/MathiasKwi900/AptusTutor.git
+
 
 Open the cloned project directory in the latest stable version of **Android Studio** and allow **Gradle** to sync.
 
