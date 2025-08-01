@@ -99,11 +99,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.play.services.auth)
     implementation(libs.androidx.core.splashscreen)
-    // --- End of Added Dependencies ---
 
     // Utilities
     implementation(libs.androidx.datastore.preferences) // For saving user role (Tutor/Student)
-    implementation(libs.gson) // For serializing data for Nearby Connections
     implementation(libs.coil.compose) // For displaying captured images
     implementation(libs.accompanist.permissions) // For handling Bluetooth/Wi-Fi permissions
 

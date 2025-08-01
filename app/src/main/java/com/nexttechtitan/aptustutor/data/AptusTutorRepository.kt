@@ -73,6 +73,7 @@ class AptusTutorRepository @Inject constructor(
     private val pendingConnectionPayloads = mutableMapOf<String, ConnectionRequestPayload>()
     private val pendingAnswerFiles = mutableMapOf<String, File>()
     private val pendingQuestionFiles = mutableMapOf<String, MutableMap<String, File>>()
+    private val incomingFilePayloads = mutableMapOf<Long, Payload>()
 
     // Private mutable state holders, exposed as immutable public flows.
     private val _tutorUiState = MutableStateFlow(TutorDashboardUiState())
@@ -401,10 +402,9 @@ class AptusTutorRepository @Inject constructor(
                     fos.write(java.nio.ByteBuffer.allocate(4).putInt(headerBytes.size).array())
                     // 2. Write header JSON
                     fos.write(headerBytes)
-                    // 3. Write image bytes from the content URI
-                    context.contentResolver.openInputStream(uri)?.use { imageInputStream ->
-                        imageInputStream.copyTo(fos)
-                    } ?: throw IOException("Could not open input stream for URI: $uri")
+                    // 3. Directly read all bytes from the file and write them.
+                    val imageBytes = File(uri.path!!).readBytes()
+                    fos.write(imageBytes)
                 }
 
                 val filePayload = Payload.fromFile(combinedFile)
@@ -531,17 +531,27 @@ class AptusTutorRepository @Inject constructor(
          * All processing is done on an IO-scoped coroutine to avoid blocking the main thread.
          */
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            repositoryScope.launch {
-                when (payload.type) {
-                    Payload.Type.BYTES -> handleBytesPayload(endpointId, payload)
-                    Payload.Type.FILE -> handleFilePayload(payload)
-                    else -> { /* Ignore Stream payloads */
-                    }
+            when (payload.type) {
+                Payload.Type.BYTES -> {
+                    repositoryScope.launch { handleBytesPayload(endpointId, payload) }
                 }
+                Payload.Type.FILE -> {
+                    incomingFilePayloads[payload.id] = payload
+                }
+                else -> { /* Ignore Stream payloads */ }
             }
         }
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
-            //
+            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+                val payload = incomingFilePayloads.remove(update.payloadId)
+                if (payload != null && payload.type == Payload.Type.FILE) {
+                    repositoryScope.launch {
+                        handleFilePayload(payload)
+                    }
+                }
+            } else if (update.status == PayloadTransferUpdate.Status.FAILURE) {
+                incomingFilePayloads.remove(update.payloadId)
+            }
         }
     }
 

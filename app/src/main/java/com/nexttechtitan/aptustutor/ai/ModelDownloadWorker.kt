@@ -49,6 +49,7 @@ class ModelDownloadWorker @AssistedInject constructor(
         private const val MODEL_FILENAME = "gemma-3n-E2B-it-int4.task"
     }
 
+    private lateinit var downloadTask: com.google.firebase.storage.StorageTask<com.google.firebase.storage.FileDownloadTask.TaskSnapshot>
     override suspend fun doWork(): Result {
         val currentStatus = userPreferencesRepo.aiModelStatusFlow.first()
         val currentPath   = userPreferencesRepo.aiModelPathFlow.first()
@@ -73,7 +74,6 @@ class ModelDownloadWorker @AssistedInject constructor(
 
         val modelRef = storage.reference.child(MODEL_REMOTE_PATH)
         val privateFile = File(appContext.filesDir, MODEL_FILENAME)
-        val downloadTask = modelRef.getFile(privateFile)
 
         try {
             val job = getCoroutineContext[Job] ?: error("CoroutineWorker should have a job")
@@ -84,6 +84,14 @@ class ModelDownloadWorker @AssistedInject constructor(
                 throw IllegalStateException("Could not determine file size from metadata. The file on the server may be corrupt.")
             }
 
+            if (privateFile.exists() && privateFile.length() == totalBytes) {
+                copyFileToPublicDownloads(privateFile)
+                notificationHelper.showDownloadCompleteNotification(notificationId, "AI Model Ready", "The AptusTutor model has been downloaded.")
+                userPreferencesRepo.setAiModel(ModelStatus.DOWNLOADED, privateFile.absolutePath)
+                return Result.success()
+            }
+
+            downloadTask = modelRef.getFile(privateFile)
             downloadTask.addOnProgressListener { taskSnapshot ->
                 try {
                     job.ensureActive()
@@ -117,7 +125,7 @@ class ModelDownloadWorker @AssistedInject constructor(
             return Result.success()
 
         } catch (e: Exception) {
-            if (!downloadTask.isCanceled) {
+            if (this::downloadTask.isInitialized && !downloadTask.isCanceled) {
                 downloadTask.cancel()
             }
             notificationHelper.showDownloadCompleteNotification(notificationId, "Download Failed", "Could not download the AI model.")
