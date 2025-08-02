@@ -28,16 +28,11 @@ The project’s vision is to address a critical gap in global education: the lim
 | 🛡️ Resilient by Design           | Features proactive device health monitoring (RAM, thermal), robust background model downloading, and resilient AI output parsing. |
 
 
-## 📸 Screenshots & Demo
+## 📸 App Screenshots
 
-<video controls width="700" preload="metadata">
-  <source src="https://github.com/MathiasKwi900/AptusTutor/releases/download/v1.0.0/Aptus_grading_mp4.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
-
-| AI Sandbox           | Grading Screen                                 | AI Model Management                                  |
-| -------------------- | ---------------------------------------------- | ---------------------------------------------------- |
-| `![Sandbox](path/to/sandbox.png)` | `![Grading](path/to/grading.png)`       | `![Model Mgmt](path/to/model-management.png)`        |
+| AI Graded Example 1                                                                                                  | AI Graded Example 2                                                                                                  | Analytics Tab                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| ![AI_graded_image_1](https://github.com/user-attachments/assets/fea39283-d32e-4d49-b6f7-3f4827422f6c)               | ![AI_graded_image_2](https://github.com/user-attachments/assets/dd11a556-6c7d-4804-9ec5-fa1400241c95)               | ![Aptus_analytics_tab_2](https://github.com/user-attachments/assets/2f5b7a27-d50f-4d13-a6fe-533edbccc773)           |
 
 
 ## 🛠️ Architecture & Tech Stack
