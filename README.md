@@ -30,7 +30,10 @@ The project’s vision is to address a critical gap in global education: the lim
 
 ## 📸 Screenshots & Demo
 
-![App Main Flow GIF](path/to/your-demo.gif)
+<video controls width="700" preload="metadata">
+  <source src="https://github.com/MathiasKwi900/AptusTutor/releases/download/v1.0.0/Aptus_grading_mp4.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
 
 | AI Sandbox           | Grading Screen                                 | AI Model Management                                  |
 | -------------------- | ---------------------------------------------- | ---------------------------------------------------- |
