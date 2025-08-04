@@ -82,6 +82,17 @@ This is the fastest way to get the app running on your device.
 
 Open the cloned project directory in the latest stable version of **Android Studio** and allow **Gradle** to sync.
 
+Note: For security reasons, the `google-services.json` file required to build the project is not included in this repository. This file contains API keys linked to a specific Firebase project.
+
+To build and run the app, you will need to generate your own `google-services.json` file by following these steps:
+
+1.  Go to the [Firebase Console](https://console.firebase.google.com/) and create a new free project.
+2.  In your new project, click on **Add app** and select the **Android** platform.
+3.  Follow the on-screen instructions to register the app.
+4.  Download the generated `google-services.json` file.
+5.  Place this file in the `app/` directory of this project.
+6.  You should now be able to build and run the project successfully in Android Studio.
+
 ### **2. Setting up the AI Model (CRITICAL STEP)**
 
 Whether you installed the app via option 1 or 2, the AI features **will not work** without the **Gemma 3n** model file. You have two options:
