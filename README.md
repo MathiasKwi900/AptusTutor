@@ -11,7 +11,7 @@ The project’s vision is to address a critical gap in global education: the lim
 
 | Link Type                   | URL                                                         |
 | --------------------------- | ----------------------------------------------------------- |
-| 🎬 Video Demo               | [Paste your video demo link here]()                        |
+| 🎬 Video Demo               | <https://youtu.be/Vqj4fbU_RQk?si=p0o45h9pyNTyGmiP>                        |
 | 📦 Live Demo (APK Download) | <https://github.com/MathiasKwi900/AptusTutor/releases/tag/v1.0.0>                   |
 | 📄 Full Technical Write-up  | <https://www.kaggle.com/competitions/google-gemma-3n-hackathon/writeups/unlocking-offline-ai-power-with-aptustutor>     |
 
